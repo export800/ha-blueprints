@@ -8,10 +8,12 @@ blueprint:
     - Rest mode: if enabled while lights are on, set to secondary brightness.
     - Requires automatic_lighting ON and manual_adjusted OFF to run.
   domain: automation
+  source_url: https://example.com/blueprints/auto-lighting-multi-stage
+
   input:
     motion_sensors:
       name: Motion sensors
-      description: One or more motion sensors (binary_sensor, device_class=motion).
+      description: One or more motion sensors (binary_sensor, device_class=motion)
       selector:
         entity:
           domain: binary_sensor
@@ -75,7 +77,7 @@ blueprint:
         entity:
           domain: input_number
 
-    # Timeouts (use HH:MM:SS)
+    # Timeouts (HH:MM:SS)
     no_motion_1m:
       name: No motion duration (Night off)
       description: Duration of no motion before turning OFF in Night Mode
@@ -176,6 +178,20 @@ blueprint:
 mode: single
 max_exceeded: silent
 
+# -------------------------
+# Variables for Jinja usage
+# -------------------------
+variables:
+  v_lights: !input lights
+  v_occupied_brightness: !input occupied_brightness
+  v_secondary_brightness: !input secondary_brightness
+  v_third_brightness: !input third_brightness
+  v_night_mode_flag: !input night_mode_flag
+  v_rest_mode_flag: !input rest_mode_flag
+
+# -------------
+# Triggers
+# -------------
 trigger:
   # Any motion becomes ON
   - id: motion_on
@@ -221,6 +237,9 @@ trigger:
     from: "off"
     to: "on"
 
+# -------------
+# Conditions
+# -------------
 condition:
   - condition: state
     entity_id: !input auto_lighting_flag
@@ -229,6 +248,9 @@ condition:
     entity_id: !input manual_adjust_flag
     state: "off"
 
+# -------------
+# Actions
+# -------------
 action:
   - choose:
 
@@ -239,7 +261,7 @@ action:
               {{ trigger.id == 'rest_mode_on' }}
           - condition: template
             value_template: >
-              {{ expand( !input lights ) | selectattr('state','eq','on') | list | count > 0 }}
+              {{ expand(v_lights) | selectattr('state','eq','on') | list | count > 0 }}
         sequence:
           - service: light.turn_on
             target:
@@ -247,7 +269,7 @@ action:
             data:
               transition: 5
               brightness_pct: >
-                {{ states( !input secondary_brightness ) | float }}
+                {{ states(v_secondary_brightness) | float }}
 
       # --- Motion Detected
       - conditions:
@@ -266,7 +288,7 @@ action:
                 data:
                   transition: !input trans_occupied_night
                   brightness_pct: >
-                    {{ states( !input occupied_brightness ) | float }}
+                    {{ states(v_occupied_brightness) | float }}
             else:
               - service: light.turn_on
                 target:
@@ -274,7 +296,7 @@ action:
                 data:
                   transition: !input trans_occupied_day
                   brightness_pct: >
-                    {{ states( !input occupied_brightness ) | float }}
+                    {{ states(v_occupied_brightness) | float }}
 
       # --- Night Mode: No motion for 1 minute → OFF (long fade)
       - conditions:
@@ -303,7 +325,7 @@ action:
             data:
               transition: !input trans_dim_5m
               brightness_pct: >
-                {{ states( !input secondary_brightness ) | float }}
+                {{ states(v_secondary_brightness) | float }}
 
       # --- No motion for 10 minutes → Third brightness
       - conditions:
@@ -317,7 +339,7 @@ action:
             data:
               transition: !input trans_dim_10m
               brightness_pct: >
-                {{ states( !input third_brightness ) | float }}
+                {{ states(v_third_brightness) | float }}
 
       # --- No motion for 15 minutes → OFF
       - conditions:
