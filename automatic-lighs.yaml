@@ -1,16 +1,17 @@
 blueprint:
-  name: Automatic Lighting (Motion + Multi-Stage Dimming)
+  name: Automatic Lighting (Motion + Multi-Stage Dimming; Mode-Aware Durations)
   description: >
     Motion-activated lighting with multi-stage dimming and mode awareness.
     - On motion: set occupied brightness (fast in day, instant in night).
-    - Night mode: if no motion for 1 minute, turn off with long fade.
-    - No motion for 5/10/15 minutes: secondary → third → off.
-    - Rest mode: if enabled while lights are on, set to secondary brightness.
+    - Night mode: no-motion uses a dedicated "night off" timeout, skipping dim stages.
+    - Day/Rest modes: no-motion stages -> Secondary -> Third -> Off, each driven by helpers.
+    - Rest mode: if enabled while lights are on, set to secondary brightness immediately.
+    - All no-motion timeouts are taken from input_number helpers so they can vary by mode.
     - Requires automatic_lighting ON and manual_adjusted OFF to run.
   domain: automation
-  source_url: https://example.com/blueprints/auto-lighting-multi-stage
 
   input:
+    # Sensors & lights
     motion_sensors:
       name: Motion sensors
       description: One or more motion sensors (binary_sensor, device_class=motion)
@@ -28,6 +29,7 @@ blueprint:
           domain: light
           multiple: true
 
+    # Master gates
     auto_lighting_flag:
       name: Master automatic lighting boolean
       description: This must be ON for the automation to run
@@ -42,74 +44,132 @@ blueprint:
         entity:
           domain: input_boolean
 
+    # Modes
+    day_mode_flag:
+      name: Day mode boolean
+      description: When ON, no-motion durations follow the Day profile
+      selector:
+        entity:
+          domain: input_boolean
+
     night_mode_flag:
       name: Night mode boolean
-      description: When ON, motion turns on lights instantly and 1-minute no-motion turns them off
+      description: When ON, motion turns on lights instantly and no-motion uses Night Off duration
       selector:
         entity:
           domain: input_boolean
 
     rest_mode_flag:
       name: Rest mode boolean
-      description: When turned ON while lights are on, set lights to secondary brightness
+      description: When ON, durations follow the Rest profile; if toggled on while lights are already on, set to secondary brightness
       selector:
         entity:
           domain: input_boolean
 
+    # Brightness helpers (0–100)
     occupied_brightness:
       name: Occupied brightness helper
-      description: input_number used for occupied brightness (0–100)
       selector:
         entity:
           domain: input_number
 
     secondary_brightness:
       name: Secondary brightness helper
-      description: input_number used for secondary stage brightness (0–100)
       selector:
         entity:
           domain: input_number
 
     third_brightness:
       name: Third brightness helper
-      description: input_number used for third stage brightness (0–100)
       selector:
         entity:
           domain: input_number
 
-    # Timeouts (HH:MM:SS)
-    no_motion_1m:
-      name: No motion duration (Night off)
-      description: Duration of no motion before turning OFF in Night Mode
-      default: "00:01:00"
+    # -------- Duration helpers (in MINUTES) --------
+    # Day profile: staged dimming to secondary -> third -> off
+    day_secondary_minutes:
+      name: Day - minutes to Secondary
       selector:
-        duration: {}
+        number:
+          min: 0
+          max: 240
+          step: 1
+          unit_of_measurement: min
+          mode: slider
+      default: 5
 
-    no_motion_5m:
-      name: No motion duration (Secondary)
-      description: Duration of no motion before setting Secondary brightness
-      default: "00:05:00"
+    day_third_minutes:
+      name: Day - minutes to Third
       selector:
-        duration: {}
+        number:
+          min: 0
+          max: 240
+          step: 1
+          unit_of_measurement: min
+          mode: slider
+      default: 10
 
-    no_motion_10m:
-      name: No motion duration (Third)
-      description: Duration of no motion before setting Third brightness
-      default: "00:10:00"
+    day_off_minutes:
+      name: Day - minutes to Off
       selector:
-        duration: {}
+        number:
+          min: 0
+          max: 240
+          step: 1
+          unit_of_measurement: min
+          mode: slider
+      default: 15
 
-    no_motion_15m:
-      name: No motion duration (Off)
-      description: Duration of no motion before turning OFF
-      default: "00:15:00"
+    # Night profile: usually a quick off; skip secondary/third stages
+    night_off_minutes:
+      name: Night - minutes to Off
+      description: Night no-motion timeout before turning OFF (stages are skipped at night)
       selector:
-        duration: {}
+        number:
+          min: 0
+          max: 240
+          step: 1
+          unit_of_measurement: min
+          mode: slider
+      default: 1
+
+    # Rest profile: staged dimming to secondary -> third -> off
+    rest_secondary_minutes:
+      name: Rest - minutes to Secondary
+      selector:
+        number:
+          min: 0
+          max: 240
+          step: 1
+          unit_of_measurement: min
+          mode: slider
+      default: 5
+
+    rest_third_minutes:
+      name: Rest - minutes to Third
+      selector:
+        number:
+          min: 0
+          max: 240
+          step: 1
+          unit_of_measurement: min
+          mode: slider
+      default: 10
+
+    rest_off_minutes:
+      name: Rest - minutes to Off
+      selector:
+        number:
+          min: 0
+          max: 240
+          step: 1
+          unit_of_measurement: min
+          mode: slider
+      default: 15
 
     # Transitions (seconds)
     trans_occupied_day:
       name: Transition (occupied, day)
-      description: Seconds to fade in when Night Mode is OFF
       default: 2
       selector:
         number:
@@ -121,7 +181,6 @@ blueprint:
 
     trans_occupied_night:
       name: Transition (occupied, night)
-      description: Seconds to fade in when Night Mode is ON (0 = instant)
       default: 0
       selector:
         number:
@@ -132,7 +191,7 @@ blueprint:
           mode: slider
 
     trans_dim_5m:
-      name: Transition (to secondary @ 5m)
+      name: Transition (to secondary stage)
       default: 30
       selector:
         number:
@@ -143,7 +202,7 @@ blueprint:
           mode: slider
 
     trans_dim_10m:
-      name: Transition (to third @ 10m)
+      name: Transition (to third stage)
       default: 30
       selector:
         number:
@@ -153,8 +212,8 @@ blueprint:
           unit_of_measurement: s
           mode: slider
 
-    trans_off_1m_night:
-      name: Transition (off @ 1m Night Mode)
+    trans_off_night:
+      name: Transition (off in Night mode)
       default: 20
       selector:
         number:
@@ -164,8 +223,8 @@ blueprint:
           unit_of_measurement: s
           mode: slider
 
-    trans_off_15m:
-      name: Transition (off @ 15m)
+    trans_off_final:
+      name: Transition (final off)
       default: 10
       selector:
         number:
@@ -175,67 +234,125 @@ blueprint:
           unit_of_measurement: s
           mode: slider
 
-mode: single
+mode: restart
 max_exceeded: silent
 
 # -------------------------
 # Variables for Jinja usage
 # -------------------------
 variables:
+  # Entities
   v_lights: !input lights
   v_occupied_brightness: !input occupied_brightness
   v_secondary_brightness: !input secondary_brightness
   v_third_brightness: !input third_brightness
+  v_day_mode_flag: !input day_mode_flag
   v_night_mode_flag: !input night_mode_flag
   v_rest_mode_flag: !input rest_mode_flag
+
+  # Duration helpers (entity references)
+  v_day_secondary_minutes: !input day_secondary_minutes
+  v_day_third_minutes: !input day_third_minutes
+  v_day_off_minutes: !input day_off_minutes
+  v_night_off_minutes: !input night_off_minutes
+  v_rest_secondary_minutes: !input rest_secondary_minutes
+  v_rest_third_minutes: !input rest_third_minutes
+  v_rest_off_minutes: !input rest_off_minutes
+
+  # Helper to compute current mode name with precedence: Rest > Night > Day > default Day
+  v_mode: >
+    {% if is_state(v_rest_mode_flag, 'on') %}
+      rest
+    {% elif is_state(v_night_mode_flag, 'on') %}
+      night
+    {% elif is_state(v_day_mode_flag, 'on') %}
+      day
+    {% else %}
+      day
+    {% endif %}
+
+  # Build HH:MM:SS strings from minute helpers for the active mode
+  v_timeout_secondary: >
+    {% set minutes =
+      (states(v_rest_mode_flag) == 'on') * (states(v_rest_secondary_minutes) | int) +
+      (states(v_rest_mode_flag) != 'on' and states(v_night_mode_flag) != 'on') * (states(v_day_secondary_minutes) | int)
+    %}
+    {# For night we do not use secondary; produce 00:00:00 (skipped) #}
+    {% if v_mode == 'night' %}
+      00:00:00
+    {% else %}
+      {% set m = minutes | int %}
+      {{ "%02d:%02d:%02d"|format(m // 60, m % 60, 0) }}
+    {% endif %}
+
+  v_timeout_third: >
+    {% set minutes =
+      (states(v_rest_mode_flag) == 'on') * (states(v_rest_third_minutes) | int) +
+      (states(v_rest_mode_flag) != 'on' and states(v_night_mode_flag) != 'on') * (states(v_day_third_minutes) | int)
+    %}
+    {% if v_mode == 'night' %}
+      00:00:00
+    {% else %}
+      {% set m = minutes | int %}
+      {{ "%02d:%02d:%02d"|format(m // 60, m % 60, 0) }}
+    {% endif %}
+
+  v_timeout_off: >
+    {% if v_mode == 'night' %}
+      {% set m = (states(v_night_off_minutes) | int) %}
+    {% elif v_mode == 'rest' %}
+      {% set m = (states(v_rest_off_minutes) | int) %}
+    {% else %}
+      {% set m = (states(v_day_off_minutes) | int) %}
+    {% endif %}
+    {{ "%02d:%02d:%02d"|format(m // 60, m % 60, 0) }}
 
 # -------------
 # Triggers
 # -------------
 trigger:
-  # Any motion becomes ON
+  # Motion became ON
   - id: motion_on
     platform: state
     entity_id: !input motion_sensors
     to: "on"
 
-  # Aggregate "no motion" windows based on sensors being OFF
-  - id: no_motion_1m
+  # Motion became OFF (start staged pipeline based on mode helpers)
+  - id: motion_off
     platform: state
     entity_id: !input motion_sensors
     to: "off"
-    for: !input no_motion_1m
 
-  - id: no_motion_5m
+  # Mode toggles — included so pending waits are restarted when modes change
+  - id: day_mode_on
     platform: state
-    entity_id: !input motion_sensors
-    to: "off"
-    for: !input no_motion_5m
+    entity_id: !input day_mode_flag
+    to: "on"
 
-  - id: no_motion_10m
+  - id: day_mode_off
     platform: state
-    entity_id: !input motion_sensors
+    entity_id: !input day_mode_flag
     to: "off"
-    for: !input no_motion_10m
 
-  - id: no_motion_15m
-    platform: state
-    entity_id: !input motion_sensors
-    to: "off"
-    for: !input no_motion_15m
-
-  # Mode toggles
   - id: night_mode_on
     platform: state
     entity_id: !input night_mode_flag
-    from: "off"
     to: "on"
+
+  - id: night_mode_off
+    platform: state
+    entity_id: !input night_mode_flag
+    to: "off"
 
   - id: rest_mode_on
     platform: state
     entity_id: !input rest_mode_flag
-    from: "off"
     to: "on"
+
+  - id: rest_mode_off
+    platform: state
+    entity_id: !input rest_mode_flag
+    to: "off"
 
 # -------------
 # Conditions
@@ -254,28 +371,24 @@ condition:
 action:
   - choose:
 
-      # --- Rest Mode: if enabled and any target light is already on, set to secondary brightness
+      # --- Rest Mode toggled ON: if any target light is already on, set to Secondary brightness
       - conditions:
           - condition: template
-            value_template: >
-              {{ trigger.id == 'rest_mode_on' }}
+            value_template: "{{ trigger.id == 'rest_mode_on' }}"
           - condition: template
-            value_template: >
-              {{ expand(v_lights) | selectattr('state','eq','on') | list | count > 0 }}
+            value_template: "{{ expand(v_lights) | selectattr('state','eq','on') | list | count > 0 }}"
         sequence:
           - service: light.turn_on
             target:
               entity_id: !input lights
             data:
               transition: 5
-              brightness_pct: >
-                {{ states(v_secondary_brightness) | float }}
+              brightness_pct: "{{ states(v_secondary_brightness) | float }}"
 
       # --- Motion Detected
       - conditions:
           - condition: template
-            value_template: >
-              {{ trigger.id == 'motion_on' }}
+            value_template: "{{ trigger.id == 'motion_on' }}"
         sequence:
           - if:
               - condition: state
@@ -287,68 +400,99 @@ action:
                   entity_id: !input lights
                 data:
                   transition: !input trans_occupied_night
-                  brightness_pct: >
-                    {{ states(v_occupied_brightness) | float }}
+                  brightness_pct: "{{ states(v_occupied_brightness) | float }}"
             else:
               - service: light.turn_on
                 target:
                   entity_id: !input lights
                 data:
                   transition: !input trans_occupied_day
-                  brightness_pct: >
-                    {{ states(v_occupied_brightness) | float }}
+                  brightness_pct: "{{ states(v_occupied_brightness) | float }}"
 
-      # --- Night Mode: No motion for 1 minute → OFF (long fade)
+      # --- Motion became OFF: staged pipeline driven by per-mode helpers
       - conditions:
           - condition: template
-            value_template: >
-              {{ trigger.id == 'no_motion_1m' }}
-          - condition: state
-            entity_id: !input night_mode_flag
-            state: "on"
+            value_template: "{{ trigger.id == 'motion_off' }}"
         sequence:
-          - service: light.turn_off
-            target:
-              entity_id: !input lights
-            data:
-              transition: !input trans_off_1m_night
 
-      # --- No motion for 5 minutes → Secondary brightness
-      - conditions:
-          - condition: template
-            value_template: >
-              {{ trigger.id == 'no_motion_5m' }}
-        sequence:
-          - service: light.turn_on
-            target:
-              entity_id: !input lights
-            data:
-              transition: !input trans_dim_5m
-              brightness_pct: >
-                {{ states(v_secondary_brightness) | float }}
+          # -------- NIGHT MODE: single timeout -> OFF (skip stages) --------
+          - if:
+              - condition: template
+                value_template: "{{ v_mode == 'night' }}"
+            then:
+              - wait_for_trigger:
+                  - platform: state
+                    entity_id: !input motion_sensors
+                    to: "on"
+                timeout: "{{ v_timeout_off }}"
+                continue_on_timeout: true
 
-      # --- No motion for 10 minutes → Third brightness
-      - conditions:
-          - condition: template
-            value_template: >
-              {{ trigger.id == 'no_motion_10m' }}
-        sequence:
-          - service: light.turn_on
-            target:
-              entity_id: !input lights
-            data:
-              transition: !input trans_dim_10m
-              brightness_pct: >
-                {{ states(v_third_brightness) | float }}
+              - if:
+                  - condition: template
+                    value_template: "{{ wait.trigger is none }}"
+                then:
+                  - service: light.turn_off
+                    target:
+                      entity_id: !input lights
+                    data:
+                      transition: !input trans_off_night
 
-      # --- No motion for 15 minutes → OFF
-      - conditions:
-          - condition: template
-            value_template: >
-              {{ trigger.id == 'no_motion_15m' }}
-        sequence:
-          - service: light.turn_off
-            target:
-              entity_id: !input lights
-            data:
-              transition: !input trans_off_15m
+            else:
+
+              # -------- DAY or REST MODE: Secondary -> Third -> Off --------
+
+              # Wait until Secondary timeout (or cancel on motion)
+              - wait_for_trigger:
+                  - platform: state
+                    entity_id: !input motion_sensors
+                    to: "on"
+                timeout: "{{ v_timeout_secondary }}"
+                continue_on_timeout: true
+
+              - if:
+                  - condition: template
+                    value_template: "{{ wait.trigger is none and v_timeout_secondary != '00:00:00' }}"
+                then:
+                  - service: light.turn_on
+                    target:
+                      entity_id: !input lights
+                    data:
+                      transition: !input trans_dim_5m
+                      brightness_pct: "{{ states(v_secondary_brightness) | float }}"
+
+              # Wait until Third timeout (or cancel on motion)
+              - wait_for_trigger:
+                  - platform: state
+                    entity_id: !input motion_sensors
+                    to: "on"
+                timeout: "{{ v_timeout_third }}"
+                continue_on_timeout: true
+
+              - if:
+                  - condition: template
+                    value_template: "{{ wait.trigger is none and v_timeout_third != '00:00:00' }}"
+                then:
+                  - service: light.turn_on
+                    target:
+                      entity_id: !input lights
+                    data:
+                      transition: !input trans_dim_10m
+                      brightness_pct: "{{ states(v_third_brightness) | float }}"
+
+              # Final wait until Off timeout (or cancel on motion)
+              - wait_for_trigger:
+                  - platform: state
+                    entity_id: !input motion_sensors
+                    to: "on"
+                timeout: "{{ v_timeout_off }}"
+                continue_on_timeout: true
+
+              - if:
+                  - condition: template
+                    value_template: "{{ wait.trigger is none }}"
+                then:
+                  - service: light.turn_off
+                    target:
+                      entity_id: !input lights
+                    data:
+                      transition: !input trans_off_final
