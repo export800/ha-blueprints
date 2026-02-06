@@ -3,14 +3,14 @@ blueprint:
   description: >
     Motion- and presence-activated lighting with multi-stage dimming controlled by helper entities.
     - Triggers from motion AND presence (binary_sensor presence/occupancy, person, device_tracker).
-    - On active (motion/presence): set occupied brightness (fast normal, instant at night).
+    - On activity (motion/presence): set occupied brightness (fast normal, instant at night).
     - Night mode: uses a dedicated off timeout and skips dimming stages.
-    - No-motion/presence pipeline: Secondary -> Third -> Off (minutes via helpers).
+    - No-activity pipeline: Secondary -> Third -> Off (minutes via helpers).
     - Requires automatic_lighting ON and ALL selected manual_adjust flags OFF to run.
   domain: automation
 
   input:
-    # Motion sensors
+    # Motion sensors (STRICT: device_class motion)
     motion_sensors:
       name: Motion sensors
       description: One or more motion sensors (binary_sensor, device_class=motion)
@@ -20,7 +20,7 @@ blueprint:
           device_class: motion
           multiple: true
 
-    # Presence (binary_sensor presence/occupancy)
+    # Presence (binary_sensor presence/occupancy/etc.) - optional
     presence_sensors:
       name: Presence/Occupancy sensors (binary_sensor)
       description: Optional: binary_sensor presence/occupancy sensors that mean "someone is here"
@@ -30,7 +30,7 @@ blueprint:
           domain: binary_sensor
           multiple: true
 
-    # People presence (person)
+    # People presence (person) - optional
     presence_people:
       name: People (person)
       description: Optional: person entities; state 'home' means present
@@ -40,7 +40,7 @@ blueprint:
           domain: person
           multiple: true
 
-    # Device trackers presence (device_tracker)
+    # Device trackers presence (device_tracker) - optional
     presence_trackers:
       name: Device trackers
       description: Optional: device_tracker entities; state 'home' means present
@@ -70,6 +70,7 @@ blueprint:
     manual_adjust_flags:
       name: Manual adjusted flags (one or more)
       description: If ANY of these are ON, the automation will NOT change the lights
+      default: []
       selector:
         entity:
           domain: input_boolean
@@ -78,7 +79,7 @@ blueprint:
     # Night mode
     night_mode_flag:
       name: Night mode boolean
-      description: When ON, motion/presence turns on lights instantly and no-motion uses Night Off duration (stages skipped)
+      description: When ON, activity turns on lights instantly and no-activity uses Night Off duration (stages skipped)
       selector:
         entity:
           domain: input_boolean
@@ -128,7 +129,7 @@ blueprint:
     # Night profile: usually a quick off; stages are skipped at night
     night_off_minutes:
       name: Night - minutes to Off
-      description: Night no-motion timeout before turning OFF (stages are skipped at night)
+      description: Night no-activity timeout before turning OFF (stages are skipped at night)
       selector:
         number:
           min: 0
@@ -209,7 +210,7 @@ mode: restart
 max_exceeded: silent
 
 # -------------------------
-# Variables for Jinja usage
+# Variables for Jinja usage (Option A)
 # -------------------------
 variables:
   # Entities
@@ -351,7 +352,7 @@ condition:
 action:
   - choose:
 
-      # --- Any "presence active" trigger OR motion_on -> Occupied brightness
+      # --- Any "activity" (motion/presence ON or arrival home) -> Occupied brightness
       - conditions:
           - condition: template
             value_template: >
@@ -376,7 +377,7 @@ action:
                   transition: !input trans_occupied_day
                   brightness_pct: "{{ states(v_occupied_brightness) | float }}"
 
-      # --- Any "presence inactive" trigger OR motion_off -> staged pipeline
+      # --- Any "inactivity" (motion/presence OFF or away) OR night mode toggle -> staged pipeline
       - conditions:
           - condition: template
             value_template: >
@@ -388,7 +389,7 @@ action:
               - condition: template
                 value_template: "{{ v_is_night | bool }}"
             then:
-              # Wait for any activity to resume (motion OR presence of any type)
+              # Wait for any activity to resume (motion OR any presence goes active/home)
               - wait_for_trigger:
                   - platform: state
                     entity_id: !input motion_sensors
