@@ -26,7 +26,7 @@ blueprint:
     # Presence (binary_sensor presence/occupancy) - optional
     presence_sensors:
       name: Presence / Occupancy sensors
-      description: Optional: binary_sensor presence/occupancy sensors that means someone is here
+      description: Optional binary_sensor presence/occupancy sensors that means someone is here
       default: []
       selector:
         entity:
