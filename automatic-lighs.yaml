@@ -8,7 +8,6 @@ blueprint:
     - Rest mode: if enabled while lights are on, set to secondary brightness.
     - Requires automatic_lighting ON and manual_adjusted OFF to run.
   domain: automation
-  source_url: https://example.com/blueprints/auto-lighting-multi-stage
   input:
     motion_sensors:
       name: Motion sensors
