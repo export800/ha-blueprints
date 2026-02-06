@@ -1,11 +1,10 @@
 blueprint:
-  name: Automatic Lighting (Motion + Multi-Stage Dimming; Mode-Aware Durations via Helpers)
+  name: Automatic Lighting (Motion + Multi-Stage Dimming; Helper-Driven Durations)
   description: >
-    Motion-activated lighting with multi-stage dimming and mode awareness.
+    Motion-activated lighting with multi-stage dimming controlled entirely by helper entities.
     - On motion: set occupied brightness (fast in day, instant in night).
     - Night mode: no-motion uses a dedicated "night off" timeout, skipping dim stages.
-    - Day/Rest modes: no-motion stages -> Secondary -> Third -> Off, each driven by helper entities (input_number).
-    - Rest mode: if enabled while lights are on, set to secondary brightness immediately.
+    - No-motion stages (Secondary -> Third -> Off) are driven by input_number helpers.
     - Requires automatic_lighting ON and manual_adjusted OFF to run.
   domain: automation
 
@@ -43,24 +42,10 @@ blueprint:
         entity:
           domain: input_boolean
 
-    # Modes
-    day_mode_flag:
-      name: Day mode boolean
-      description: When ON, no-motion durations follow the Day/Rest profile using helper entities
-      selector:
-        entity:
-          domain: input_boolean
-
+    # Night mode (only remaining mode)
     night_mode_flag:
       name: Night mode boolean
-      description: When ON, motion turns on lights instantly and no-motion uses Night Off duration
-      selector:
-        entity:
-          domain: input_boolean
-
-    rest_mode_flag:
-      name: Rest mode boolean
-      description: When ON, durations follow the same helper entities as Day; if toggled while lights are on, set to secondary brightness
+      description: When ON, motion turns on lights instantly and no-motion uses Night Off duration (stages skipped)
       selector:
         entity:
           domain: input_boolean
@@ -85,24 +70,24 @@ blueprint:
           domain: input_number
 
     # -------- Duration helpers (entity selectors; values are MINUTES) --------
-    # Shared by Day and Rest modes (one helper each)
+    # Shared for all non-night cases
     secondary_minutes_helper:
-      name: Minutes to Secondary (Day & Rest)
-      description: input_number entity whose value (in minutes) controls the first dim stage in Day/Rest
+      name: Minutes to Secondary (Helper)
+      description: input_number entity whose value (in minutes) controls the first dim stage
       selector:
         entity:
           domain: input_number
 
     third_minutes_helper:
-      name: Minutes to Third (Day & Rest)
-      description: input_number entity whose value (in minutes) controls the second dim stage in Day/Rest
+      name: Minutes to Third (Helper)
+      description: input_number entity whose value (in minutes) controls the second dim stage
       selector:
         entity:
           domain: input_number
 
     off_minutes_helper:
-      name: Minutes to Off (Day & Rest)
-      description: input_number entity whose value (in minutes) controls the final off stage in Day/Rest
+      name: Minutes to Off (Helper)
+      description: input_number entity whose value (in minutes) controls the final off stage
       selector:
         entity:
           domain: input_number
@@ -122,7 +107,7 @@ blueprint:
 
     # Transitions (seconds)
     trans_occupied_day:
-      name: Transition (occupied, day)
+      name: Transition (occupied, normal)
       default: 2
       selector:
         number:
@@ -199,30 +184,22 @@ variables:
   v_occupied_brightness: !input occupied_brightness
   v_secondary_brightness: !input secondary_brightness
   v_third_brightness: !input third_brightness
-  v_day_mode_flag: !input day_mode_flag
   v_night_mode_flag: !input night_mode_flag
-  v_rest_mode_flag: !input rest_mode_flag
 
   # Duration helpers (entity references)
   v_secondary_minutes_ent: !input secondary_minutes_helper
   v_third_minutes_ent: !input third_minutes_helper
   v_off_minutes_ent: !input off_minutes_helper
 
-  # Helper to compute current mode name with precedence: Rest > Night > Day > default Day
-  v_mode: >
-    {% if is_state(v_rest_mode_flag, 'on') %}
-      rest
-    {% elif is_state(v_night_mode_flag, 'on') %}
-      night
-    {% elif is_state(v_day_mode_flag, 'on') %}
-      day
-    {% else %}
-      day
-    {% endif %}
+  # Night off minutes (plain number input captured for template use)
+  v_night_off_minutes: !input night_off_minutes
 
-  # Build HH:MM:SS strings from minute helpers for the active mode
+  # Convenience flag
+  v_is_night: "{{ is_state(v_night_mode_flag, 'on') }}"
+
+  # Build HH:MM:SS strings from minute helpers
   v_timeout_secondary: >
-    {% if v_mode == 'night' %}
+    {% if v_is_night | bool %}
       00:00:00
     {% else %}
       {% set m = (states(v_secondary_minutes_ent) | float(0)) %}
@@ -235,7 +212,7 @@ variables:
     {% endif %}
 
   v_timeout_third: >
-    {% if v_mode == 'night' %}
+    {% if v_is_night | bool %}
       00:00:00
     {% else %}
       {% set m = (states(v_third_minutes_ent) | float(0)) %}
@@ -248,8 +225,8 @@ variables:
     {% endif %}
 
   v_timeout_off: >
-    {% if v_mode == 'night' %}
-      {% set mi = ( !input night_off_minutes ) | int %}
+    {% if v_is_night | bool %}
+      {% set mi = (v_night_off_minutes | int(0)) %}
     {% else %}
       {% set m = (states(v_off_minutes_ent) | float(0)) %}
       {% set mi = m | int %}
@@ -266,36 +243,21 @@ trigger:
     entity_id: !input motion_sensors
     to: "on"
 
-  # Motion became OFF (start staged pipeline based on mode helpers)
+  # Motion became OFF (start staged pipeline based on helpers)
   - id: motion_off
     platform: state
     entity_id: !input motion_sensors
     to: "off"
 
-  # Mode toggles — included so pending waits are restarted when modes change
-  - id: day_mode_on
-    platform: state
-    entity_id: !input day_mode_flag
-    to: "on"
-  - id: day_mode_off
-    platform: state
-    entity_id: !input day_mode_flag
-    to: "off"
+  # Night mode toggles — restart pending waits when mode changes
   - id: night_mode_on
     platform: state
     entity_id: !input night_mode_flag
     to: "on"
+
   - id: night_mode_off
     platform: state
     entity_id: !input night_mode_flag
-    to: "off"
-  - id: rest_mode_on
-    platform: state
-    entity_id: !input rest_mode_flag
-    to: "on"
-  - id: rest_mode_off
-    platform: state
-    entity_id: !input rest_mode_flag
     to: "off"
 
 # -------------
@@ -314,20 +276,6 @@ condition:
 # -------------
 action:
   - choose:
-
-      # --- Rest Mode toggled ON: if any target light is already on, set to Secondary brightness
-      - conditions:
-          - condition: template
-            value_template: "{{ trigger.id == 'rest_mode_on' }}"
-          - condition: template
-            value_template: "{{ expand(v_lights) | selectattr('state','eq','on') | list | count > 0 }}"
-        sequence:
-          - service: light.turn_on
-            target:
-              entity_id: !input lights
-            data:
-              transition: 5
-              brightness_pct: "{{ states(v_secondary_brightness) | float }}"
 
       # --- Motion Detected
       - conditions:
@@ -362,7 +310,7 @@ action:
           # -------- NIGHT MODE: single timeout -> OFF (skip stages) --------
           - if:
               - condition: template
-                value_template: "{{ v_mode == 'night' }}"
+                value_template: "{{ v_is_night | bool }}"
             then:
               - wait_for_trigger:
                   - platform: state
@@ -383,7 +331,7 @@ action:
 
             else:
 
-              # -------- DAY or REST MODE: Secondary -> Third -> Off --------
+              # -------- NORMAL: Secondary -> Third -> Off --------
 
               # Wait until Secondary timeout (or cancel on motion)
               - wait_for_trigger:
@@ -440,3 +388,4 @@ action:
                       entity_id: !input lights
                     data:
                       transition: !input trans_off_final
+``
