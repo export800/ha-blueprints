@@ -56,7 +56,7 @@ blueprint:
           domain: device_tracker
           multiple: true
 
-    # Presence devices (Device Registry selection) - optional
+    # NEW: Presence devices (Device Registry selection) - optional
     presence_devices:
       name: Presence devices (device registry)
       description: >
@@ -122,7 +122,8 @@ blueprint:
         entity:
           domain: input_number
 
-    # Duration helpers (entity selectors; values are MINUTES)
+    # -------- Duration helpers (entity selectors; values are MINUTES) --------
+    # Shared for all non-night cases
     secondary_minutes_helper:
       name: Minutes to Secondary (Helper)
       description: input_number entity whose value (in minutes) controls the first dim stage
@@ -228,7 +229,7 @@ mode: restart
 max_exceeded: silent
 
 # -------------------------
-# Variables (Option A) + Reusable templates via YAML anchors
+# Variables for Jinja usage (Option A)
 # -------------------------
 variables:
   # Entities
@@ -245,7 +246,7 @@ variables:
   v_presence_people: !input presence_people
   v_presence_trackers: !input presence_trackers
 
-  # Presence devices (device IDs)
+  # NEW: Presence devices (device ids)
   v_presence_devices: !input presence_devices
 
   # Duration helpers (entity references)
@@ -259,7 +260,7 @@ variables:
   # Convenience flag
   v_is_night: "{{ is_state(v_night_mode_flag, 'on') }}"
 
-  # HH:MM:SS timeouts derived from helpers (0 minutes -> skip stage)
+  # Build HH:MM:SS strings from minute helpers
   v_timeout_secondary: >
     {% if v_is_night | bool %}
       00:00:00
@@ -295,36 +296,8 @@ variables:
     {% endif %}
     {{ "%02d:%02d:%02d"|format(mi // 60, mi % 60, 0) }}
 
-  # ---------- Reusable Templates (YAML anchors) ----------
-  # True if ANY activity is present (used in waits to cancel pipeline)
-  any_active_template: &ANY_ACTIVE_TEMPLATE >
-    {% set ents = expand(v_motion) + expand(v_presence_bin) + expand(v_presence_people) + expand(v_presence_trackers) %}
-    {% set dev_ents = [] %}
-    {% for did in v_presence_devices %}
-      {% set dev_ents = dev_ents + device_entities(did) %}
-    {% endfor %}
-    {% set all_ents = ents + expand(dev_ents) %}
-    {% set bin_on = all_ents | selectattr('domain','eq','binary_sensor') | selectattr('state','eq','on') | list %}
-    {% set home_on = all_ents | selectattr('domain','in',['person','device_tracker']) | selectattr('state','eq','home') | list %}
-    {{ (bin_on | count) + (home_on | count) > 0 }}
-
-  # True if ALL activity sources are inactive/away (gate to start pipeline)
-  all_inactive_template: &ALL_INACTIVE_TEMPLATE >
-    {% set ents = expand(v_motion) + expand(v_presence_bin) + expand(v_presence_people) + expand(v_presence_trackers) %}
-    {% set dev_ents = [] %}
-    {% for did in v_presence_devices %}
-      {% set dev_ents = dev_ents + device_entities(did) %}
-    {% endfor %}
-    {% set all_ents = ents + expand(dev_ents) %}
-    {% set active =
-         (all_ents | selectattr('domain','eq','binary_sensor') | selectattr('state','eq','on') | list)
-         +
-         (all_ents | selectattr('domain','in',['person','device_tracker']) | selectattr('state','eq','home') | list)
-    %}
-    {{ active | count == 0 }}
-
 # -------------
-# Triggers
+# Triggers (entity-based)
 # -------------
 trigger:
   # Motion ON/OFF
@@ -332,7 +305,6 @@ trigger:
     platform: state
     entity_id: !input motion_sensors
     to: "on"
-
   - id: motion_off
     platform: state
     entity_id: !input motion_sensors
@@ -343,7 +315,6 @@ trigger:
     platform: state
     entity_id: !input presence_sensors
     to: "on"
-
   - id: presence_bin_off
     platform: state
     entity_id: !input presence_sensors
@@ -354,7 +325,6 @@ trigger:
     platform: state
     entity_id: !input presence_people
     to: "home"
-
   - id: person_away
     platform: state
     entity_id: !input presence_people
@@ -365,7 +335,6 @@ trigger:
     platform: state
     entity_id: !input presence_trackers
     to: "home"
-
   - id: tracker_away
     platform: state
     entity_id: !input presence_trackers
@@ -376,7 +345,6 @@ trigger:
     platform: state
     entity_id: !input night_mode_flag
     to: "on"
-
   - id: night_mode_off
     platform: state
     entity_id: !input night_mode_flag
@@ -392,7 +360,6 @@ condition:
 
   # If ANY manual adjust flag is ON, block automation changes
   - condition: template
-    alias: "Automation gated by Manual Adjust flags (must all be OFF)"
     value_template: >
       {{ expand(v_manual_adjust_flags) | selectattr('state','eq','on') | list | count == 0 }}
 
@@ -402,10 +369,9 @@ condition:
 action:
   - choose:
 
-      # --- Any activity ON/HOME -> Occupied brightness
+      # --- Any "activity" (motion/presence ON or arrival home) -> Occupied brightness
       - conditions:
           - condition: template
-            alias: "Activity became ON/HOME"
             value_template: >
               {{ trigger.id in ['motion_on','presence_bin_on','person_home','tracker_home'] }}
         sequence:
@@ -415,7 +381,6 @@ action:
                 state: "on"
             then:
               - service: light.turn_on
-                alias: "Turn on (Night) @ Occupied brightness"
                 target:
                   entity_id: !input lights
                 data:
@@ -423,44 +388,59 @@ action:
                   brightness_pct: "{{ states(v_occupied_brightness) | float }}"
             else:
               - service: light.turn_on
-                alias: "Turn on (Normal) @ Occupied brightness"
                 target:
                   entity_id: !input lights
                 data:
                   transition: !input trans_occupied_day
                   brightness_pct: "{{ states(v_occupied_brightness) | float }}"
 
-      # --- Any inactivity OFF/AWAY or Night toggle -> staged pipeline
+      # --- Any "inactivity" (motion/presence OFF or away) OR night mode toggle -> staged pipeline
       - conditions:
           - condition: template
-            alias: "Inactivity or Night mode toggle"
             value_template: >
               {{ trigger.id in ['motion_off','presence_bin_off','person_away','tracker_away','night_mode_on','night_mode_off'] }}
         sequence:
 
-          # Gate: proceed only if ALL activity sources are inactive/away
+          # Only proceed if ALL selected sources (entities + derived from devices) are inactive/away
           - condition: template
-            alias: "All sources inactive → start pipeline"
-            value_template: *ALL_INACTIVE_TEMPLATE
+            value_template: >
+              {% set ents = expand(v_motion) + expand(v_presence_bin) + expand(v_presence_people) + expand(v_presence_trackers) %}
+              {% set dev_ents = [] %}
+              {% for did in v_presence_devices %}
+                {% set dev_ents = dev_ents + device_entities(did) %}
+              {% endfor %}
+              {% set all_ents = ents + expand(dev_ents) %}
+              {% set active =
+                   (all_ents | selectattr('domain','eq','binary_sensor') | selectattr('state','eq','on') | list)
+                   +
+                   (all_ents | selectattr('domain','in',['person','device_tracker']) | selectattr('state','eq','home') | list)
+              %}
+              {{ active | count == 0 }}
 
           # -------- NIGHT MODE: single timeout -> OFF (skip stages) --------
           - if:
               - condition: template
-                alias: "Night mode is active"
                 value_template: "{{ v_is_night | bool }}"
             then:
-              - wait_template: *ANY_ACTIVE_TEMPLATE
-                alias: "Wait (Night) for any activity to resume"
+              # Wait for any activity to resume (any entity from selections or devices becomes active/home)
+              - wait_template: >
+                  {% set ents = expand(v_motion) + expand(v_presence_bin) + expand(v_presence_people) + expand(v_presence_trackers) %}
+                  {% set dev_ents = [] %}
+                  {% for did in v_presence_devices %}
+                    {% set dev_ents = dev_ents + device_entities(did) %}
+                  {% endfor %}
+                  {% set all_ents = ents + expand(dev_ents) %}
+                  {% set bin_on = all_ents | selectattr('domain','eq','binary_sensor') | selectattr('state','eq','on') | list %}
+                  {% set home_on = all_ents | selectattr('domain','in',['person','device_tracker']) | selectattr('state','eq','home') | list %}
+                  {{ (bin_on | count) + (home_on | count) > 0 }}
                 timeout: "{{ v_timeout_off }}"
                 continue_on_timeout: true
 
               - if:
                   - condition: template
-                    alias: "Night wait timed out (no activity)"
                     value_template: "{{ not wait.completed }}"
                 then:
                   - service: light.turn_off
-                    alias: "Turn off (Night)"
                     target:
                       entity_id: !input lights
                     data:
@@ -470,57 +450,75 @@ action:
 
               # -------- NORMAL: Secondary -> Third -> Off --------
 
-              # 5m-equivalent → Secondary
-              - wait_template: *ANY_ACTIVE_TEMPLATE
-                alias: "Wait for activity or Secondary timeout"
+              # Wait until Secondary timeout (or cancel on any activity ON/HOME)
+              - wait_template: >
+                  {% set ents = expand(v_motion) + expand(v_presence_bin) + expand(v_presence_people) + expand(v_presence_trackers) %}
+                  {% set dev_ents = [] %}
+                  {% for did in v_presence_devices %}
+                    {% set dev_ents = dev_ents + device_entities(did) %}
+                  {% endfor %}
+                  {% set all_ents = ents + expand(dev_ents) %}
+                  {% set bin_on = all_ents | selectattr('domain','eq','binary_sensor') | selectattr('state','eq','on') | list %}
+                  {% set home_on = all_ents | selectattr('domain','in',['person','device_tracker']) | selectattr('state','eq','home') | list %}
+                  {{ (bin_on | count) + (home_on | count) > 0 }}
                 timeout: "{{ v_timeout_secondary }}"
                 continue_on_timeout: true
 
               - if:
                   - condition: template
-                    alias: "Secondary timeout elapsed (no activity) and stage enabled"
                     value_template: "{{ not wait.completed and v_timeout_secondary != '00:00:00' }}"
                 then:
                   - service: light.turn_on
-                    alias: "Set Secondary brightness"
                     target:
                       entity_id: !input lights
                     data:
                       transition: !input trans_dim_5m
                       brightness_pct: "{{ states(v_secondary_brightness) | float }}"
 
-              # 10m-equivalent → Third
-              - wait_template: *ANY_ACTIVE_TEMPLATE
-                alias: "Wait for activity or Third timeout"
+              # Wait until Third timeout (or cancel on any activity ON/HOME)
+              - wait_template: >
+                  {% set ents = expand(v_motion) + expand(v_presence_bin) + expand(v_presence_people) + expand(v_presence_trackers) %}
+                  {% set dev_ents = [] %}
+                  {% for did in v_presence_devices %}
+                    {% set dev_ents = dev_ents + device_entities(did) %}
+                  {% endfor %}
+                  {% set all_ents = ents + expand(dev_ents) %}
+                  {% set bin_on = all_ents | selectattr('domain','eq','binary_sensor') | selectattr('state','eq','on') | list %}
+                  {% set home_on = all_ents | selectattr('domain','in',['person','device_tracker']) | selectattr('state','eq','home') | list %}
+                  {{ (bin_on | count) + (home_on | count) > 0 }}
                 timeout: "{{ v_timeout_third }}"
                 continue_on_timeout: true
 
               - if:
                   - condition: template
-                    alias: "Third timeout elapsed (no activity) and stage enabled"
                     value_template: "{{ not wait.completed and v_timeout_third != '00:00:00' }}"
                 then:
                   - service: light.turn_on
-                    alias: "Set Third brightness"
                     target:
                       entity_id: !input lights
                     data:
                       transition: !input trans_dim_10m
                       brightness_pct: "{{ states(v_third_brightness) | float }}"
 
-              # Final → Off
-              - wait_template: *ANY_ACTIVE_TEMPLATE
-                alias: "Wait for activity or Off timeout"
+              # Final wait until Off timeout (or cancel on any activity ON/HOME)
+              - wait_template: >
+                  {% set ents = expand(v_motion) + expand(v_presence_bin) + expand(v_presence_people) + expand(v_presence_trackers) %}
+                  {% set dev_ents = [] %}
+                  {% for did in v_presence_devices %}
+                    {% set dev_ents = dev_ents + device_entities(did) %}
+                  {% endfor %}
+                  {% set all_ents = ents + expand(dev_ents) %}
+                  {% set bin_on = all_ents | selectattr('domain','eq','binary_sensor') | selectattr('state','eq','on') | list %}
+                  {% set home_on = all_ents | selectattr('domain','in',['person','device_tracker']) | selectattr('state','eq','home') | list %}
+                  {{ (bin_on | count) + (home_on | count) > 0 }}
                 timeout: "{{ v_timeout_off }}"
                 continue_on_timeout: true
 
               - if:
                   - condition: template
-                    alias: "Final timeout elapsed (no activity)"
                     value_template: "{{ not wait.completed }}"
                 then:
                   - service: light.turn_off
-                    alias: "Turn off (Final)"
                     target:
                       entity_id: !input lights
                     data:
