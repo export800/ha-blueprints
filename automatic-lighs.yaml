@@ -1,6 +1,6 @@
 blueprint:
   name: "Automatic Lighting (Motion + Multi-Stage Dimming; Helper-Driven Durations)"
-  description: "Motion-activated lighting with multi-stage dimming controlled entirely by helper entities. Supports motion sensors and presence entities (binary_sensor presence/occupancy, person, device_tracker)."
+  description: "Motion-activated lighting with multi-stage dimming controlled by helper entities. Supports motion and presence (binary_sensor presence/occupancy, person, device_tracker)."
   domain: automation
 
   input:
@@ -99,7 +99,7 @@ blueprint:
         entity:
           domain: input_number
 
-    # -------- Duration helpers (entity selectors; values are MINUTES) --------
+    # Duration helpers (entity selectors; values are MINUTES)
     secondary_minutes_helper:
       name: "Minutes to Secondary (Helper)"
       description: "input_number entity whose value (in minutes) controls the first dim stage; set to 0 to skip."
@@ -333,3 +333,135 @@ condition:
 
 # -------------
 # Actions
+# -------------
+action:
+  - choose:
+
+      # --- Any activity ON/HOME -> Occupied brightness
+      - conditions:
+          - condition: template
+            value_template: >
+              {{ trigger.id in ['motion_on','presence_bin_on','person_home','tracker_home'] }}
+        sequence:
+          - if:
+              - condition: state
+                entity_id: !input night_mode_flag
+                state: "on"
+            then:
+              - service: light.turn_on
+                target:
+                  entity_id: !input lights
+                data:
+                  transition: !input trans_occupied_night
+                  brightness_pct: "{{ states(v_occupied_brightness) | float }}"
+            else:
+              - service: light.turn_on
+                target:
+                  entity_id: !input lights
+                data:
+                  transition: !input trans_occupied_day
+                  brightness_pct: "{{ states(v_occupied_brightness) | float }}"
+
+      # --- Any inactivity OFF/AWAY or Night toggle -> staged pipeline
+      - conditions:
+          - condition: template
+            value_template: >
+              {{ trigger.id in ['motion_off','presence_bin_off','person_away','tracker_away','night_mode_on','night_mode_off'] }}
+        sequence:
+
+          # Proceed only if ALL sources are inactive/away
+          - condition: template
+            value_template: >
+              {% set ents = expand(v_motion) + expand(v_presence_bin) + expand(v_presence_people) + expand(v_presence_trackers) %}
+              {% set active =
+                   ents | selectattr('domain','eq','binary_sensor') | selectattr('state','eq','on') | list
+                   +
+                   (ents | selectattr('domain','in',['person','device_tracker']) | selectattr('state','eq','home') | list)
+              %}
+              {{ active | count == 0 }}
+
+          # -------- NIGHT MODE: single timeout -> OFF (skip stages)
+          - if:
+              - condition: template
+                value_template: "{{ v_is_night | bool }}"
+            then:
+              - wait_for_trigger:
+                  - platform: state
+                    entity_id: !input motion_sensors
+                    to: "on"
+                  - platform: state
+                    entity_id: !input presence_sensors
+                    to: "on"
+                  - platform: state
+                    entity_id: !input presence_people
+                    to: "home"
+                  - platform: state
+                    entity_id: !input presence_trackers
+                    to: "home"
+                timeout: "{{ v_timeout_off }}"
+                continue_on_timeout: true
+
+              - if:
+                  - condition: template
+                    value_template: "{{ wait.trigger is none }}"
+                then:
+                  - service: light.turn_off
+                    target:
+                      entity_id: !input lights
+                    data:
+                      transition: !input trans_off_night
+
+            else:
+
+              # -------- NORMAL: Secondary -> Third -> Off
+
+              # Wait until Secondary timeout (or cancel on any activity)
+              - wait_for_trigger:
+                  - platform: state
+                    entity_id: !input motion_sensors
+                    to: "on"
+                  - platform: state
+                    entity_id: !input presence_sensors
+                    to: "on"
+                  - platform: state
+                    entity_id: !input presence_people
+                    to: "home"
+                  - platform: state
+                    entity_id: !input presence_trackers
+                    to: "home"
+                timeout: "{{ v_timeout_secondary }}"
+                continue_on_timeout: true
+
+              - if:
+                  - condition: template
+                    value_template: "{{ wait.trigger is none and v_timeout_secondary != '00:00:00' }}"
+                then:
+                  - service: light.turn_on
+                    target:
+                      entity_id: !input lights
+                    data:
+                      transition: !input trans_dim_5m
+                      brightness_pct: "{{ states(v_secondary_brightness) | float }}"
+
+              # Wait until Third timeout (or cancel on any activity)
+              - wait_for_trigger:
+                  - platform: state
+                    entity_id: !input motion_sensors
+                    to: "on"
+                  - platform: state
+                    entity_id: !input presence_sensors
+                    to: "on"
+                  - platform: state
+                    entity_id: !input presence_people
+                    to: "home"
+                  - platform: state
+                    entity_id: !input presence_trackers
+                    to: "home"
+                timeout: "{{ v_timeout_third }}"
+                continue_on_timeout: true
+
+              - if:
+                  - condition: template
+                    value_template: "{{ wait.trigger is none and v_timeout_third != '00:00:00' }}"
+                then:
+                  - service: light.turn_on
