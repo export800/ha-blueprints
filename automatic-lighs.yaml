@@ -1,52 +1,27 @@
 blueprint:
-  name: "Automatic Lighting (Motion + Multi-Stage Dimming; Helper-Driven Durations)"
-  description: "Motion-activated lighting with multi-stage dimming controlled by helper entities. Supports motion and presence (binary_sensor presence/occupancy, person, device_tracker)."
+  name: Automatic Lighting (Motion + Multi-Stage Dimming; Helper-Driven Durations)
+  description: >
+    Motion-activated lighting with multi-stage dimming controlled entirely by helper entities.
+    - On motion: set occupied brightness (fast in normal, instant in night).
+    - Night mode: no-motion uses a dedicated "night off" timeout, skipping dim stages.
+    - No-motion stages (Secondary -> Third -> Off) are driven by input_number helpers.
+    - Requires automatic_lighting ON and ALL selected manual_adjust flags OFF to run.
   domain: automation
 
   input:
     # Sensors & lights
     motion_sensors:
-      name: "Motion sensors"
-      description: "One or more motion sensors (binary_sensor, device_class=motion)."
+      name: Motion sensors
+      description: One or more motion sensors (binary_sensor, device_class=motion)
       selector:
         entity:
           domain: binary_sensor
           device_class: motion
           multiple: true
 
-    presence_sensors:
-      name: "Presence / Occupancy sensors"
-      description: "Optional presence/occupancy binary_sensors; 'on' means present."
-      default: []
-      selector:
-        entity:
-          domain: binary_sensor
-          device_class:
-            - occupancy
-            - presence
-          multiple: true
-
-    presence_people:
-      name: "People (person)"
-      description: "Optional person entities; 'home' means present."
-      default: []
-      selector:
-        entity:
-          domain: person
-          multiple: true
-
-    presence_trackers:
-      name: "Device trackers"
-      description: "Optional device_tracker entities; 'home' means present."
-      default: []
-      selector:
-        entity:
-          domain: device_tracker
-          multiple: true
-
     lights:
-      name: "Lights to control"
-      description: "One or more light entities to control together."
+      name: Lights to control
+      description: One or more light entities to control together
       selector:
         entity:
           domain: light
@@ -54,89 +29,86 @@ blueprint:
 
     # Master gates
     auto_lighting_flag:
-      name: "Master automatic lighting boolean"
-      description: "This must be ON for the automation to run."
+      name: Master automatic lighting boolean
+      description: This must be ON for the automation to run
       selector:
         entity:
           domain: input_boolean
 
     manual_adjust_flags:
-      name: "Manual adjusted flags (one or more)"
-      description: "If ANY of these are ON, the automation will NOT change the lights."
-      default: []
+      name: Manual adjusted flags (one or more)
+      description: If ANY of these are ON, the automation will NOT change the lights
       selector:
         entity:
           domain: input_boolean
           multiple: true
 
-    # Night mode
+    # Night mode (only remaining mode)
     night_mode_flag:
-      name: "Night mode boolean"
-      description: "When ON, motion/presence turns on lights instantly and no-activity uses Night Off duration (stages skipped)."
+      name: Night mode boolean
+      description: When ON, motion turns on lights instantly and no-motion uses Night Off duration (stages skipped)
       selector:
         entity:
           domain: input_boolean
 
     # Brightness helpers (0–100)
     occupied_brightness:
-      name: "Occupied brightness helper"
-      description: "input_number helper for occupied brightness (0–100)."
+      name: Occupied brightness helper
       selector:
         entity:
           domain: input_number
 
     secondary_brightness:
-      name: "Secondary brightness helper"
-      description: "input_number helper for secondary stage brightness (0–100)."
+      name: Secondary brightness helper
       selector:
         entity:
           domain: input_number
 
     third_brightness:
-      name: "Third brightness helper"
-      description: "input_number helper for third stage brightness (0–100)."
+      name: Third brightness helper
       selector:
         entity:
           domain: input_number
 
-    # Duration helpers (entity selectors; values are MINUTES)
+    # -------- Duration helpers (entity selectors; values are MINUTES) --------
+    # Shared for all non-night cases
     secondary_minutes_helper:
-      name: "Minutes to Secondary (Helper)"
-      description: "input_number entity whose value (in minutes) controls the first dim stage; set to 0 to skip."
+      name: Minutes to Secondary (Helper)
+      description: input_number entity whose value (in minutes) controls the first dim stage
       selector:
         entity:
           domain: input_number
 
     third_minutes_helper:
-      name: "Minutes to Third (Helper)"
-      description: "input_number entity whose value (in minutes) controls the second dim stage; set to 0 to skip."
+      name: Minutes to Third (Helper)
+      description: input_number entity whose value (in minutes) controls the second dim stage
       selector:
         entity:
           domain: input_number
 
     off_minutes_helper:
-      name: "Minutes to Off (Helper)"
-      description: "input_number entity whose value (in minutes) controls the final off stage."
+      name: Minutes to Off (Helper)
+      description: input_number entity whose value (in minutes) controls the final off stage
       selector:
         entity:
           domain: input_number
 
     # Night profile: usually a quick off; stages are skipped at night
     night_off_minutes:
-      name: "Night - minutes to Off"
-      description: "Night no-motion/presence timeout before turning OFF (stages are skipped at night)."
+      name: Night - minutes to Off
+      description: Night no-motion timeout before turning OFF (stages are skipped at night)
       selector:
         number:
           min: 0
           max: 240
           step: 1
           unit_of_measurement: min
+          mode: slider
       default: 1
 
     # Transitions (seconds)
     trans_occupied_day:
-      name: "Transition (occupied, normal)"
-      description: "Seconds to fade in when Night Mode is OFF."
+      name: Transition (occupied, normal)
       default: 2
       selector:
         number:
@@ -144,10 +116,10 @@ blueprint:
           max: 60
           step: 1
           unit_of_measurement: s
+          mode: slider
 
     trans_occupied_night:
-      name: "Transition (occupied, night)"
-      description: "Seconds to fade in when Night Mode is ON (0 = instant)."
+      name: Transition (occupied, night)
       default: 0
       selector:
         number:
@@ -155,10 +127,10 @@ blueprint:
           max: 60
           step: 1
           unit_of_measurement: s
+          mode: slider
 
     trans_dim_5m:
-      name: "Transition (to secondary stage)"
-      description: "Seconds to dim to Secondary."
+      name: Transition (to secondary stage)
       default: 30
       selector:
         number:
@@ -166,10 +138,10 @@ blueprint:
           max: 120
           step: 1
           unit_of_measurement: s
+          mode: slider
 
     trans_dim_10m:
-      name: "Transition (to third stage)"
-      description: "Seconds to dim to Third."
+      name: Transition (to third stage)
       default: 30
       selector:
         number:
@@ -177,10 +149,10 @@ blueprint:
           max: 120
           step: 1
           unit_of_measurement: s
+          mode: slider
 
     trans_off_night:
-      name: "Transition (off in Night mode)"
-      description: "Seconds to fade off in Night mode."
+      name: Transition (off in Night mode)
       default: 20
       selector:
         number:
@@ -188,10 +160,10 @@ blueprint:
           max: 120
           step: 1
           unit_of_measurement: s
+          mode: slider
 
     trans_off_final:
-      name: "Transition (final off)"
-      description: "Seconds to fade off at the final stage."
+      name: Transition (final off)
       default: 10
       selector:
         number:
@@ -199,6 +171,7 @@ blueprint:
           max: 120
           step: 1
           unit_of_measurement: s
+          mode: slider
 
 mode: restart
 max_exceeded: silent
@@ -214,12 +187,6 @@ variables:
   v_third_brightness: !input third_brightness
   v_night_mode_flag: !input night_mode_flag
   v_manual_adjust_flags: !input manual_adjust_flags
-
-  # Presence groups
-  v_motion: !input motion_sensors
-  v_presence_bin: !input presence_sensors
-  v_presence_people: !input presence_people
-  v_presence_trackers: !input presence_trackers
 
   # Duration helpers (entity references)
   v_secondary_minutes_ent: !input secondary_minutes_helper
@@ -238,8 +205,12 @@ variables:
       00:00:00
     {% else %}
       {% set m = (states(v_secondary_minutes_ent) | float(0)) %}
-      {% set mi = m | int %}
-      {{ "%02d:%02d:%02d"|format(mi // 60, mi % 60, 0) }}
+      {% if m <= 0 %}
+        00:00:00
+      {% else %}
+        {% set mi = m | int %}
+        {{ "%02d:%02d:%02d"|format(mi // 60, mi % 60, 0) }}
+      {% endif %}
     {% endif %}
 
   v_timeout_third: >
@@ -247,8 +218,12 @@ variables:
       00:00:00
     {% else %}
       {% set m = (states(v_third_minutes_ent) | float(0)) %}
-      {% set mi = m | int %}
-      {{ "%02d:%02d:%02d"|format(mi // 60, mi % 60, 0) }}
+      {% if m <= 0 %}
+        00:00:00
+      {% else %}
+        {% set mi = m | int %}
+        {{ "%02d:%02d:%02d"|format(mi // 60, mi % 60, 0) }}
+      {% endif %}
     {% endif %}
 
   v_timeout_off: >
@@ -264,49 +239,17 @@ variables:
 # Triggers
 # -------------
 trigger:
-  # Motion ON/OFF
+  # Motion became ON
   - id: motion_on
     platform: state
     entity_id: !input motion_sensors
     to: "on"
 
+  # Motion became OFF (start staged pipeline based on helpers)
   - id: motion_off
     platform: state
     entity_id: !input motion_sensors
     to: "off"
-
-  # Presence binary sensors ON/OFF
-  - id: presence_bin_on
-    platform: state
-    entity_id: !input presence_sensors
-    to: "on"
-
-  - id: presence_bin_off
-    platform: state
-    entity_id: !input presence_sensors
-    to: "off"
-
-  # Person home/away
-  - id: person_home
-    platform: state
-    entity_id: !input presence_people
-    to: "home"
-
-  - id: person_away
-    platform: state
-    entity_id: !input presence_people
-    to: "not_home"
-
-  # Device tracker home/away
-  - id: tracker_home
-    platform: state
-    entity_id: !input presence_trackers
-    to: "home"
-
-  - id: tracker_away
-    platform: state
-    entity_id: !input presence_trackers
-    to: "not_home"
 
   # Night mode toggles — restart pending waits when mode changes
   - id: night_mode_on
@@ -329,7 +272,8 @@ condition:
 
   # If ANY manual adjust flag is ON, block automation changes
   - condition: template
-    value_template: "{{ expand(v_manual_adjust_flags) | selectattr('state','eq','on') | list | count == 0 }}"
+    value_template: >
+      {{ expand(v_manual_adjust_flags) | selectattr('state','eq','on') | list | count == 0 }}
 
 # -------------
 # Actions
@@ -337,11 +281,10 @@ condition:
 action:
   - choose:
 
-      # --- Any activity ON/HOME -> Occupied brightness
+      # --- Motion Detected
       - conditions:
           - condition: template
-            value_template: >
-              {{ trigger.id in ['motion_on','presence_bin_on','person_home','tracker_home'] }}
+            value_template: "{{ trigger.id == 'motion_on' }}"
         sequence:
           - if:
               - condition: state
@@ -362,25 +305,13 @@ action:
                   transition: !input trans_occupied_day
                   brightness_pct: "{{ states(v_occupied_brightness) | float }}"
 
-      # --- Any inactivity OFF/AWAY or Night toggle -> staged pipeline
+      # --- Motion became OFF: staged pipeline driven by helper entities
       - conditions:
           - condition: template
-            value_template: >
-              {{ trigger.id in ['motion_off','presence_bin_off','person_away','tracker_away','night_mode_on','night_mode_off'] }}
+            value_template: "{{ trigger.id == 'motion_off' }}"
         sequence:
 
-          # Proceed only if ALL sources are inactive/away
-          - condition: template
-            value_template: >
-              {% set ents = expand(v_motion) + expand(v_presence_bin) + expand(v_presence_people) + expand(v_presence_trackers) %}
-              {% set active =
-                   ents | selectattr('domain','eq','binary_sensor') | selectattr('state','eq','on') | list
-                   +
-                   (ents | selectattr('domain','in',['person','device_tracker']) | selectattr('state','eq','home') | list)
-              %}
-              {{ active | count == 0 }}
-
-          # -------- NIGHT MODE: single timeout -> OFF (skip stages)
+          # -------- NIGHT MODE: single timeout -> OFF (skip stages) --------
           - if:
               - condition: template
                 value_template: "{{ v_is_night | bool }}"
@@ -389,15 +320,6 @@ action:
                   - platform: state
                     entity_id: !input motion_sensors
                     to: "on"
-                  - platform: state
-                    entity_id: !input presence_sensors
-                    to: "on"
-                  - platform: state
-                    entity_id: !input presence_people
-                    to: "home"
-                  - platform: state
-                    entity_id: !input presence_trackers
-                    to: "home"
                 timeout: "{{ v_timeout_off }}"
                 continue_on_timeout: true
 
@@ -413,22 +335,13 @@ action:
 
             else:
 
-              # -------- NORMAL: Secondary -> Third -> Off
+              # -------- NORMAL: Secondary -> Third -> Off --------
 
-              # Wait until Secondary timeout (or cancel on any activity)
+              # Wait until Secondary timeout (or cancel on motion)
               - wait_for_trigger:
                   - platform: state
                     entity_id: !input motion_sensors
                     to: "on"
-                  - platform: state
-                    entity_id: !input presence_sensors
-                    to: "on"
-                  - platform: state
-                    entity_id: !input presence_people
-                    to: "home"
-                  - platform: state
-                    entity_id: !input presence_trackers
-                    to: "home"
                 timeout: "{{ v_timeout_secondary }}"
                 continue_on_timeout: true
 
@@ -443,20 +356,11 @@ action:
                       transition: !input trans_dim_5m
                       brightness_pct: "{{ states(v_secondary_brightness) | float }}"
 
-              # Wait until Third timeout (or cancel on any activity)
+              # Wait until Third timeout (or cancel on motion)
               - wait_for_trigger:
                   - platform: state
                     entity_id: !input motion_sensors
                     to: "on"
-                  - platform: state
-                    entity_id: !input presence_sensors
-                    to: "on"
-                  - platform: state
-                    entity_id: !input presence_people
-                    to: "home"
-                  - platform: state
-                    entity_id: !input presence_trackers
-                    to: "home"
                 timeout: "{{ v_timeout_third }}"
                 continue_on_timeout: true
 
@@ -465,3 +369,26 @@ action:
                     value_template: "{{ wait.trigger is none and v_timeout_third != '00:00:00' }}"
                 then:
                   - service: light.turn_on
+                    target:
+                      entity_id: !input lights
+                    data:
+                      transition: !input trans_dim_10m
+                      brightness_pct: "{{ states(v_third_brightness) | float }}"
+
+              # Final wait until Off timeout (or cancel on motion)
+              - wait_for_trigger:
+                  - platform: state
+                    entity_id: !input motion_sensors
+                    to: "on"
+                timeout: "{{ v_timeout_off }}"
+                continue_on_timeout: true
+
+              - if:
+                  - condition: template
+                    value_template: "{{ wait.trigger is none }}"
+                then:
+                  - service: light.turn_off
+                    target:
+                      entity_id: !input lights
+                    data:
+                      transition: !input trans_off_final
