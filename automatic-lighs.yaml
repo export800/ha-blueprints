@@ -1,11 +1,14 @@
 blueprint:
-  name: Automatic Lighting (Motion + Multi-Stage Dimming; Helper-Driven Durations)
+  name: Automatic Lighting (Motion + Multi-Stage Dimming; Helper-Driven Durations + Manual Failsafe)
   description: >
     Motion-activated lighting with multi-stage dimming controlled entirely by helper entities.
     - On motion: set occupied brightness (fast in normal, instant in night).
     - Night mode: no-motion uses a dedicated "night off" timeout, skipping dim stages.
     - No-motion stages (Secondary -> Third -> Off) are driven by input_number helpers.
-    - Requires automatic_lighting ON and ALL selected manual_adjust flags OFF to run.
+    - Requires automatic_lighting ON.
+    - NEW: If ANY selected manual_adjust flags are ON, the automation will NOT change lights on motion or mode toggles,
+      BUT will still enforce a configurable failsafe: turn OFF after X minutes of no motion.
+
   domain: automation
 
   input:
@@ -36,7 +39,7 @@ blueprint:
 
     manual_adjust_flags:
       name: Manual adjusted flags (one or more)
-      description: If ANY of these are ON, the automation will NOT change the lights
+      description: If ANY of these are ON, the automation will NOT change the lights on motion/mode—but WILL still enforce the no-motion failsafe off
       selector:
         entity:
           domain: input_boolean
@@ -104,6 +107,19 @@ blueprint:
           unit_of_measurement: min
           mode: slider
       default: 1
+
+    # NEW — Manual override failsafe timeout (minutes)
+    manual_override_off_minutes:
+      name: Manual override – minutes to Off
+      description: When any manual_adjust flag is ON, turn lights OFF after this many minutes without motion
+      selector:
+        number:
+          min: 1
+          max: 240
+          step: 1
+          unit_of_measurement: min
+          mode: slider
+      default: 60
 
     # Transitions (seconds)
     trans_occupied_day:
@@ -195,8 +211,15 @@ variables:
   # Night off minutes (plain number input)
   v_night_off_minutes: !input night_off_minutes
 
-  # Convenience flag
+  # NEW: Manual override failsafe minutes and derived timeout string
+  v_manual_override_off_minutes: !input manual_override_off_minutes
+  v_manual_off_timeout: >
+    {% set mi = (v_manual_override_off_minutes | int(60)) %}
+    {{ "%02d:%02d:%02d"|format(mi // 60, mi % 60, 0) }}
+
+  # Convenience flags
   v_is_night: "{{ is_state(v_night_mode_flag, 'on') }}"
+  v_any_manual_on: "{{ expand(v_manual_adjust_flags) | selectattr('state','eq','on') | list | count > 0 }}"
 
   # Build HH:MM:SS strings from minute helpers
   v_timeout_secondary: >
@@ -269,21 +292,16 @@ condition:
     entity_id: !input auto_lighting_flag
     state: "on"
 
-  # If ANY manual adjust flag is ON, block automation changes
-  - condition: template
-    value_template: >
-      {{ expand(v_manual_adjust_flags) | selectattr('state','eq','on') | list | count == 0 }}
-
 # -------------
 # Actions
 # -------------
 action:
   - choose:
 
-      # --- Motion Detected
+      # --- Motion Detected (suppressed if manual flags are ON)
       - conditions:
           - condition: template
-            value_template: "{{ trigger.id == 'motion_on' }}"
+            value_template: "{{ trigger.id == 'motion_on' and not (v_any_manual_on | bool) }}"
         sequence:
           - if:
               - condition: state
@@ -304,82 +322,31 @@ action:
                   transition: !input trans_occupied_day
                   brightness_pct: "{{ states(v_occupied_brightness) | float }}"
 
-      # --- Motion became OFF: staged pipeline driven by helper entities
+      # --- Night mode toggled (suppressed if manual flags are ON)
+      - conditions:
+          - condition: template
+            value_template: "{{ (trigger.id == 'night_mode_on' or trigger.id == 'night_mode_off') and not (v_any_manual_on | bool) }}"
+        sequence:
+          # No direct action required here beyond restarting waits;
+          # This branch exists only to 'restart' the pipeline when mode flips.
+          - choose: []
+
+      # --- Motion became OFF
       - conditions:
           - condition: template
             value_template: "{{ trigger.id == 'motion_off' }}"
         sequence:
 
-          # -------- NIGHT MODE: single timeout -> OFF (skip stages) --------
+          # -------- MANUAL FAILSAFE: when any manual flags are ON --------
           - if:
               - condition: template
-                value_template: "{{ v_is_night | bool }}"
+                value_template: "{{ v_any_manual_on | bool }}"
             then:
               - wait_for_trigger:
                   - platform: state
                     entity_id: !input motion_sensors
                     to: "on"
-                timeout: "{{ v_timeout_off }}"
-                continue_on_timeout: true
-
-              - if:
-                  - condition: template
-                    value_template: "{{ wait.trigger is none }}"
-                then:
-                  - service: light.turn_off
-                    target:
-                      entity_id: !input lights
-                    data:
-                      transition: !input trans_off_night
-
-            else:
-
-              # -------- NORMAL: Secondary -> Third -> Off --------
-
-              # Wait until Secondary timeout (or cancel on motion)
-              - wait_for_trigger:
-                  - platform: state
-                    entity_id: !input motion_sensors
-                    to: "on"
-                timeout: "{{ v_timeout_secondary }}"
-                continue_on_timeout: true
-
-              - if:
-                  - condition: template
-                    value_template: "{{ wait.trigger is none and v_timeout_secondary != '00:00:00' }}"
-                then:
-                  - service: light.turn_on
-                    target:
-                      entity_id: !input lights
-                    data:
-                      transition: !input trans_dim_5m
-                      brightness_pct: "{{ states(v_secondary_brightness) | float }}"
-
-              # Wait until Third timeout (or cancel on motion)
-              - wait_for_trigger:
-                  - platform: state
-                    entity_id: !input motion_sensors
-                    to: "on"
-                timeout: "{{ v_timeout_third }}"
-                continue_on_timeout: true
-
-              - if:
-                  - condition: template
-                    value_template: "{{ wait.trigger is none and v_timeout_third != '00:00:00' }}"
-                then:
-                  - service: light.turn_on
-                    target:
-                      entity_id: !input lights
-                    data:
-                      transition: !input trans_dim_10m
-                      brightness_pct: "{{ states(v_third_brightness) | float }}"
-
-              # Final wait until Off timeout (or cancel on motion)
-              - wait_for_trigger:
-                  - platform: state
-                    entity_id: !input motion_sensors
-                    to: "on"
-                timeout: "{{ v_timeout_off }}"
+                timeout: "{{ v_manual_off_timeout }}"
                 continue_on_timeout: true
 
               - if:
@@ -391,3 +358,87 @@ action:
                       entity_id: !input lights
                     data:
                       transition: !input trans_off_final
+
+            else:
+
+              # -------- NIGHT MODE: single timeout -> OFF (skip stages) --------
+              - if:
+                  - condition: template
+                    value_template: "{{ v_is_night | bool }}"
+                then:
+                  - wait_for_trigger:
+                      - platform: state
+                        entity_id: !input motion_sensors
+                        to: "on"
+                    timeout: "{{ v_timeout_off }}"
+                    continue_on_timeout: true
+
+                  - if:
+                      - condition: template
+                        value_template: "{{ wait.trigger is none }}"
+                    then:
+                      - service: light.turn_off
+                        target:
+                          entity_id: !input lights
+                        data:
+                          transition: !input trans_off_night
+
+                else:
+
+                  # -------- NORMAL: Secondary -> Third -> Off --------
+
+                  # Wait until Secondary timeout (or cancel on motion)
+                  - wait_for_trigger:
+                      - platform: state
+                        entity_id: !input motion_sensors
+                        to: "on"
+                    timeout: "{{ v_timeout_secondary }}"
+                    continue_on_timeout: true
+
+                  - if:
+                      - condition: template
+                        value_template: "{{ wait.trigger is none and v_timeout_secondary != '00:00:00' }}"
+                    then:
+                      - service: light.turn_on
+                        target:
+                          entity_id: !input lights
+                        data:
+                          transition: !input trans_dim_5m
+                          brightness_pct: "{{ states(v_secondary_brightness) | float }}"
+
+                  # Wait until Third timeout (or cancel on motion)
+                  - wait_for_trigger:
+                      - platform: state
+                        entity_id: !input motion_sensors
+                        to: "on"
+                    timeout: "{{ v_timeout_third }}"
+                    continue_on_timeout: true
+
+                  - if:
+                      - condition: template
+                        value_template: "{{ wait.trigger is none and v_timeout_third != '00:00:00' }}"
+                    then:
+                      - service: light.turn_on
+                        target:
+                          entity_id: !input lights
+                        data:
+                          transition: !input trans_dim_10m
+                          brightness_pct: "{{ states(v_third_brightness) | float }}"
+
+                  # Final wait until Off timeout (or cancel on motion)
+                  - wait_for_trigger:
+                      - platform: state
+                        entity_id: !input motion_sensors
+                        to: "on"
+                    timeout: "{{ v_timeout_off }}"
+                    continue_on_timeout: true
+
+                  - if:
+                      - condition: template
+                        value_template: "{{ wait.trigger is none }}"
+                    then:
+                      - service: light.turn_off
+                        target:
+                          entity_id: !input lights
+                        data:
+                          transition: !input trans_off_final
