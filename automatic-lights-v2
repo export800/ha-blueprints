@@ -1,0 +1,499 @@
+blueprint:
+  name: Automatic Lighting (Motion + 4-Stage Dimming; Helper-Driven Durations + Manual Failsafe + Derived Dims)
+  description: >
+    Motion-activated lighting with helper-driven multi-stage dimming.
+    - On motion: set occupied brightness (fast in normal, instant in night).
+    - Night mode: no-motion uses a dedicated "night off" timeout, skipping dim stages.
+    - Normal mode dim pipeline: Stage2 -> Stage3 -> Stage4 -> Off (durations driven by input_number helpers).
+    - Brightness stages are derived from Occupied brightness:
+        Stage2 = 3/4, Stage3 = 2/4, Stage4 = 1/4 of occupied.
+    - Requires automatic_lighting ON.
+    - If ANY selected manual_adjust flags are ON, the automation will NOT change lights on motion/mode,
+      BUT will still enforce a configurable failsafe: turn OFF after X minutes of no motion.
+
+  domain: automation
+
+  input:
+    # Sensors & lights
+    motion_sensors:
+      name: Motion sensors
+      description: One or more motion sensors (binary_sensor, device_class=motion)
+      selector:
+        entity:
+          domain: binary_sensor
+          multiple: true
+
+    lights:
+      name: Lights to control
+      description: One or more light entities to control together
+      selector:
+        entity:
+          domain: light
+          multiple: true
+
+    # Master gates
+    auto_lighting_flag:
+      name: Master automatic lighting boolean
+      description: This must be ON for the automation to run
+      selector:
+        entity:
+          domain: input_boolean
+
+    manual_adjust_flags:
+      name: Manual adjusted flags (one or more)
+      description: If ANY of these are ON, the automation will NOT change the lights on motion/mode—but WILL still enforce the no-motion failsafe off
+      selector:
+        entity:
+          domain: input_boolean
+          multiple: true
+
+    # Night mode
+    night_mode_flag:
+      name: Night mode boolean
+      description: When ON, motion turns on lights instantly and no-motion uses Night Off duration (stages skipped)
+      selector:
+        entity:
+          domain: input_boolean
+
+    # Brightness helper (0–100)
+    occupied_brightness:
+      name: Occupied brightness helper
+      description: input_number holding occupied brightness (0-100). Dim stages are derived from this value.
+      selector:
+        entity:
+          domain: input_number
+
+    # -------- Duration helpers (entity selectors; values are MINUTES) --------
+    secondary_minutes_helper:
+      name: Minutes to Stage 2 (Helper)
+      description: input_number entity whose value (in minutes) controls the first dim stage
+      selector:
+        entity:
+          domain: input_number
+
+    third_minutes_helper:
+      name: Minutes to Stage 3 (Helper)
+      description: input_number entity whose value (in minutes) controls the second dim stage
+      selector:
+        entity:
+          domain: input_number
+
+    fourth_minutes_helper:
+      name: Minutes to Stage 4 (Helper)
+      description: input_number entity whose value (in minutes) controls the third dim stage
+      selector:
+        entity:
+          domain: input_number
+
+    off_minutes_helper:
+      name: Minutes to Off (Helper)
+      description: input_number entity whose value (in minutes) controls the final off stage
+      selector:
+        entity:
+          domain: input_number
+
+    # Night profile: usually a quick off; stages are skipped at night
+    night_off_minutes:
+      name: Night - minutes to Off
+      description: Night no-motion timeout before turning OFF (stages are skipped at night)
+      selector:
+        number:
+          min: 0
+          max: 240
+          step: 1
+          unit_of_measurement: min
+          mode: slider
+      default: 1
+
+    # Manual override failsafe timeout (minutes)
+    manual_override_off_minutes:
+      name: Manual override – minutes to Off
+      description: When any manual_adjust flag is ON, turn lights OFF after this many minutes without motion
+      selector:
+        number:
+          min: 1
+          max: 240
+          step: 1
+          unit_of_measurement: min
+          mode: slider
+      default: 60
+
+    # Transitions (seconds)
+    trans_occupied_day:
+      name: Transition (occupied, normal)
+      default: 2
+      selector:
+        number:
+          min: 0
+          max: 60
+          step: 1
+          unit_of_measurement: s
+          mode: slider
+
+    trans_occupied_night:
+      name: Transition (occupied, night)
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 60
+          step: 1
+          unit_of_measurement: s
+          mode: slider
+
+    trans_dim_5m:
+      name: Transition (to Stage 2)
+      default: 30
+      selector:
+        number:
+          min: 0
+          max: 120
+          step: 1
+          unit_of_measurement: s
+          mode: slider
+
+    trans_dim_10m:
+      name: Transition (to Stage 3)
+      default: 30
+      selector:
+        number:
+          min: 0
+          max: 120
+          step: 1
+          unit_of_measurement: s
+          mode: slider
+
+    trans_dim_15m:
+      name: Transition (to Stage 4)
+      default: 30
+      selector:
+        number:
+          min: 0
+          max: 120
+          step: 1
+          unit_of_measurement: s
+          mode: slider
+
+    trans_off_night:
+      name: Transition (off in Night mode)
+      default: 20
+      selector:
+        number:
+          min: 0
+          max: 120
+          step: 1
+          unit_of_measurement: s
+          mode: slider
+
+    trans_off_final:
+      name: Transition (final off)
+      default: 10
+      selector:
+        number:
+          min: 0
+          max: 120
+          step: 1
+          unit_of_measurement: s
+          mode: slider
+
+mode: restart
+max_exceeded: silent
+
+# -------------------------
+# Variables for Jinja usage
+# -------------------------
+variables:
+  # Entities
+  v_lights: !input lights
+  v_occupied_brightness: !input occupied_brightness
+  v_night_mode_flag: !input night_mode_flag
+  v_manual_adjust_flags: !input manual_adjust_flags
+
+  # Duration helpers (entity references)
+  v_secondary_minutes_ent: !input secondary_minutes_helper
+  v_third_minutes_ent: !input third_minutes_helper
+  v_fourth_minutes_ent: !input fourth_minutes_helper
+  v_off_minutes_ent: !input off_minutes_helper
+
+  # Night off minutes (plain number input)
+  v_night_off_minutes: !input night_off_minutes
+
+  # Manual override failsafe minutes and derived timeout string
+  v_manual_override_off_minutes: !input manual_override_off_minutes
+  v_manual_off_timeout: >
+    {% set mi = (v_manual_override_off_minutes | int(60)) %}
+    {{ "%02d:%02d:%02d"|format(mi // 60, mi % 60, 0) }}
+
+  # Convenience flags
+  v_is_night: "{{ is_state(v_night_mode_flag, 'on') }}"
+  v_any_manual_on: "{{ expand(v_manual_adjust_flags) | selectattr('state','eq','on') | list | count > 0 }}"
+
+  # Derived brightness stages from occupied brightness (clamped 0..100)
+  v_occ_pct: >
+    {% set occ = (states(v_occupied_brightness) | float(0)) %}
+    {{ [0, [occ, 100] | min] | max }}
+
+  # Stage 2/3/4 derived as quarters of occupied
+  v_stage2_pct: >
+    {% set occ = (states(v_occupied_brightness) | float(0)) %}
+    {% set occ = [0, [occ, 100] | min] | max %}
+    {{ (occ * 3 / 4) | round(0) }}
+
+  v_stage3_pct: >
+    {% set occ = (states(v_occupied_brightness) | float(0)) %}
+    {% set occ = [0, [occ, 100] | min] | max %}
+    {{ (occ * 2 / 4) | round(0) }}
+
+  v_stage4_pct: >
+    {% set occ = (states(v_occupied_brightness) | float(0)) %}
+    {% set occ = [0, [occ, 100] | min] | max %}
+    {{ (occ * 1 / 4) | round(0) }}
+
+  # Build HH:MM:SS strings from minute helpers
+  v_timeout_stage2: >
+    {% if v_is_night | bool %}
+      00:00:00
+    {% else %}
+      {% set m = (states(v_secondary_minutes_ent) | float(0)) %}
+      {% if m <= 0 %}
+        00:00:00
+      {% else %}
+        {% set mi = m | int %}
+        {{ "%02d:%02d:%02d"|format(mi // 60, mi % 60, 0) }}
+      {% endif %}
+    {% endif %}
+
+  v_timeout_stage3: >
+    {% if v_is_night | bool %}
+      00:00:00
+    {% else %}
+      {% set m = (states(v_third_minutes_ent) | float(0)) %}
+      {% if m <= 0 %}
+        00:00:00
+      {% else %}
+        {% set mi = m | int %}
+        {{ "%02d:%02d:%02d"|format(mi // 60, mi % 60, 0) }}
+      {% endif %}
+    {% endif %}
+
+  v_timeout_stage4: >
+    {% if v_is_night | bool %}
+      00:00:00
+    {% else %}
+      {% set m = (states(v_fourth_minutes_ent) | float(0)) %}
+      {% if m <= 0 %}
+        00:00:00
+      {% else %}
+        {% set mi = m | int %}
+        {{ "%02d:%02d:%02d"|format(mi // 60, mi % 60, 0) }}
+      {% endif %}
+    {% endif %}
+
+  v_timeout_off: >
+    {% if v_is_night | bool %}
+      {% set mi = (v_night_off_minutes | int(0)) %}
+    {% else %}
+      {% set m = (states(v_off_minutes_ent) | float(0)) %}
+      {% set mi = m | int %}
+    {% endif %}
+    {{ "%02d:%02d:%02d"|format(mi // 60, mi % 60, 0) }}
+
+# -------------
+# Triggers
+# -------------
+trigger:
+  - id: motion_on
+    platform: state
+    entity_id: !input motion_sensors
+    to: "on"
+
+  - id: motion_off
+    platform: state
+    entity_id: !input motion_sensors
+    to: "off"
+
+  - id: night_mode_on
+    platform: state
+    entity_id: !input night_mode_flag
+    to: "on"
+
+  - id: night_mode_off
+    platform: state
+    entity_id: !input night_mode_flag
+    to: "off"
+
+# -------------
+# Conditions
+# -------------
+condition:
+  - condition: state
+    entity_id: !input auto_lighting_flag
+    state: "on"
+
+# -------------
+# Actions
+# -------------
+action:
+  - choose:
+
+      # --- Motion Detected (suppressed if manual flags are ON)
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'motion_on' and not (v_any_manual_on | bool) }}"
+        sequence:
+          - if:
+              - condition: state
+                entity_id: !input night_mode_flag
+                state: "on"
+            then:
+              - service: light.turn_on
+                target:
+                  entity_id: !input lights
+                data:
+                  transition: !input trans_occupied_night
+                  brightness_pct: "{{ v_occ_pct | float }}"
+            else:
+              - service: light.turn_on
+                target:
+                  entity_id: !input lights
+                data:
+                  transition: !input trans_occupied_day
+                  brightness_pct: "{{ v_occ_pct | float }}"
+
+      # --- Night mode toggled (suppressed if manual flags are ON)
+      - conditions:
+          - condition: template
+            value_template: "{{ (trigger.id == 'night_mode_on' or trigger.id == 'night_mode_off') and not (v_any_manual_on | bool) }}"
+        sequence:
+          - choose: []
+
+      # --- Motion became OFF
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'motion_off' }}"
+        sequence:
+
+          # -------- MANUAL FAILSAFE: when any manual flags are ON --------
+          - if:
+              - condition: template
+                value_template: "{{ v_any_manual_on | bool }}"
+            then:
+              - wait_for_trigger:
+                  - platform: state
+                    entity_id: !input motion_sensors
+                    to: "on"
+                timeout: "{{ v_manual_off_timeout }}"
+                continue_on_timeout: true
+
+              - if:
+                  - condition: template
+                    value_template: "{{ wait.trigger is none }}"
+                then:
+                  - service: light.turn_off
+                    target:
+                      entity_id: !input lights
+                    data:
+                      transition: !input trans_off_final
+
+            else:
+
+              # -------- NIGHT MODE: single timeout -> OFF (skip stages) --------
+              - if:
+                  - condition: template
+                    value_template: "{{ v_is_night | bool }}"
+                then:
+                  - wait_for_trigger:
+                      - platform: state
+                        entity_id: !input motion_sensors
+                        to: "on"
+                    timeout: "{{ v_timeout_off }}"
+                    continue_on_timeout: true
+
+                  - if:
+                      - condition: template
+                        value_template: "{{ wait.trigger is none }}"
+                    then:
+                      - service: light.turn_off
+                        target:
+                          entity_id: !input lights
+                        data:
+                          transition: !input trans_off_night
+
+                else:
+
+                  # -------- NORMAL: Stage2 -> Stage3 -> Stage4 -> Off --------
+
+                  # Wait until Stage 2 timeout (or cancel on motion)
+                  - wait_for_trigger:
+                      - platform: state
+                        entity_id: !input motion_sensors
+                        to: "on"
+                    timeout: "{{ v_timeout_stage2 }}"
+                    continue_on_timeout: true
+
+                  - if:
+                      - condition: template
+                        value_template: "{{ wait.trigger is none and v_timeout_stage2 != '00:00:00' }}"
+                    then:
+                      - service: light.turn_on
+                        target:
+                          entity_id: !input lights
+                        data:
+                          transition: !input trans_dim_5m
+                          brightness_pct: "{{ v_stage2_pct | float }}"
+
+                  # Wait until Stage 3 timeout (or cancel on motion)
+                  - wait_for_trigger:
+                      - platform: state
+                        entity_id: !input motion_sensors
+                        to: "on"
+                    timeout: "{{ v_timeout_stage3 }}"
+                    continue_on_timeout: true
+
+                  - if:
+                      - condition: template
+                        value_template: "{{ wait.trigger is none and v_timeout_stage3 != '00:00:00' }}"
+                    then:
+                      - service: light.turn_on
+                        target:
+                          entity_id: !input lights
+                        data:
+                          transition: !input trans_dim_10m
+                          brightness_pct: "{{ v_stage3_pct | float }}"
+
+                  # Wait until Stage 4 timeout (or cancel on motion)
+                  - wait_for_trigger:
+                      - platform: state
+                        entity_id: !input motion_sensors
+                        to: "on"
+                    timeout: "{{ v_timeout_stage4 }}"
+                    continue_on_timeout: true
+
+                  - if:
+                      - condition: template
+                        value_template: "{{ wait.trigger is none and v_timeout_stage4 != '00:00:00' }}"
+                    then:
+                      - service: light.turn_on
+                        target:
+                          entity_id: !input lights
+                        data:
+                          transition: !input trans_dim_15m
+                          brightness_pct: "{{ v_stage4_pct | float }}"
+
+                  # Final wait until Off timeout (or cancel on motion)
+                  - wait_for_trigger:
+                      - platform: state
+                        entity_id: !input motion_sensors
+                        to: "on"
+                    timeout: "{{ v_timeout_off }}"
+                    continue_on_timeout: true
+
+                  - if:
+                      - condition: template
+                        value_template: "{{ wait.trigger is none }}"
+                    then:
+                      - service: light.turn_off
+                        target:
+                          entity_id: !input lights
+                        data:
+                          transition: !input trans_off_final
