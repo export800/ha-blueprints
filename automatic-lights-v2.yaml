@@ -1,15 +1,15 @@
 blueprint:
-  name: Automatic Lighting (Motion + 4-Stage Dimming; Helper-Driven Durations + Manual Failsafe + Derived Dims)
+  name: Automatic Lighting (Motion + 4-Stage Dimming; Day/Evening Inputs + Manual Failsafe + Derived Dims)
   description: >
-    Motion-activated lighting with helper-driven multi-stage dimming.
+    Motion-activated lighting with 4-stage dimming and user-entered Day/Evening durations.
     - On motion: set occupied brightness (fast in normal, instant in night).
-    - Night mode: no-motion uses a dedicated "night off" timeout, skipping dim stages.
-    - Normal mode dim pipeline: Stage2 -> Stage3 -> Stage4 -> Off (durations driven by input_number helpers).
-    - Brightness stages are derived from Occupied brightness:
+    - Normal (non-night) pipeline: Stage2 -> Stage3 -> Stage4 -> Off.
+    - Stage brightness is derived from Occupied brightness:
         Stage2 = 3/4, Stage3 = 2/4, Stage4 = 1/4 of occupied.
-    - Requires automatic_lighting ON.
-    - If ANY selected manual_adjust flags are ON, the automation will NOT change lights on motion/mode,
-      BUT will still enforce a configurable failsafe: turn OFF after X minutes of no motion.
+    - Day vs Evening mode uses separate user-entered minute values for Stage2/3/4/Off.
+    - Night mode skips dim stages and uses Night Off duration.
+    - If ANY manual_adjust flags are ON, automation will NOT change lights on motion/mode,
+      BUT will still enforce failsafe: turn OFF after X minutes of no motion.
 
   domain: automation
 
@@ -41,16 +41,23 @@ blueprint:
 
     manual_adjust_flags:
       name: Manual adjusted flags (one or more)
-      description: If ANY of these are ON, the automation will NOT change the lights on motion/mode—but WILL still enforce the no-motion failsafe off
+      description: If ANY of these are ON, automation won't adjust on motion/mode—but WILL still enforce the no-motion failsafe off
       selector:
         entity:
           domain: input_boolean
           multiple: true
 
-    # Night mode
+    # Mode flags
     night_mode_flag:
       name: Night mode boolean
       description: When ON, motion turns on lights instantly and no-motion uses Night Off duration (stages skipped)
+      selector:
+        entity:
+          domain: input_boolean
+
+    evening_mode_flag:
+      name: Evening mode boolean
+      description: When ON (and Night mode is OFF), use Evening minute values for dimming/off pipeline
       selector:
         entity:
           domain: input_boolean
@@ -63,36 +70,97 @@ blueprint:
         entity:
           domain: input_number
 
-    # -------- Duration helpers (entity selectors; values are MINUTES) --------
-    secondary_minutes_helper:
-      name: Minutes to Stage 2 (Helper)
-      description: input_number entity whose value (in minutes) controls the first dim stage
+    # -------- Day durations (minutes) --------
+    day_stage2_minutes:
+      name: Day - minutes to Stage 2
       selector:
-        entity:
-          domain: input_number
+        number:
+          min: 0
+          max: 240
+          step: 1
+          unit_of_measurement: min
+          mode: slider
+      default: 5
 
-    third_minutes_helper:
-      name: Minutes to Stage 3 (Helper)
-      description: input_number entity whose value (in minutes) controls the second dim stage
+    day_stage3_minutes:
+      name: Day - minutes to Stage 3
       selector:
-        entity:
-          domain: input_number
+        number:
+          min: 0
+          max: 240
+          step: 1
+          unit_of_measurement: min
+          mode: slider
+      default: 10
 
-    fourth_minutes_helper:
-      name: Minutes to Stage 4 (Helper)
-      description: input_number entity whose value (in minutes) controls the third dim stage
+    day_stage4_minutes:
+      name: Day - minutes to Stage 4
       selector:
-        entity:
-          domain: input_number
+        number:
+          min: 0
+          max: 240
+          step: 1
+          unit_of_measurement: min
+          mode: slider
+      default: 15
 
-    off_minutes_helper:
-      name: Minutes to Off (Helper)
-      description: input_number entity whose value (in minutes) controls the final off stage
+    day_off_minutes:
+      name: Day - minutes to Off
       selector:
-        entity:
-          domain: input_number
+        number:
+          min: 0
+          max: 240
+          step: 1
+          unit_of_measurement: min
+          mode: slider
+      default: 20
 
-    # Night profile: usually a quick off; stages are skipped at night
+    # -------- Evening durations (minutes) --------
+    evening_stage2_minutes:
+      name: Evening - minutes to Stage 2
+      selector:
+        number:
+          min: 0
+          max: 240
+          step: 1
+          unit_of_measurement: min
+          mode: slider
+      default: 3
+
+    evening_stage3_minutes:
+      name: Evening - minutes to Stage 3
+      selector:
+        number:
+          min: 0
+          max: 240
+          step: 1
+          unit_of_measurement: min
+          mode: slider
+      default: 6
+
+    evening_stage4_minutes:
+      name: Evening - minutes to Stage 4
+      selector:
+        number:
+          min: 0
+          max: 240
+          step: 1
+          unit_of_measurement: min
+          mode: slider
+      default: 9
+
+    evening_off_minutes:
+      name: Evening - minutes to Off
+      selector:
+        number:
+          min: 0
+          max: 240
+          step: 1
+          unit_of_measurement: min
+          mode: slider
+      default: 12
+
+    # -------- Night off minutes (stages skipped at night) --------
     night_off_minutes:
       name: Night - minutes to Off
       description: Night no-motion timeout before turning OFF (stages are skipped at night)
@@ -120,7 +188,7 @@ blueprint:
 
     # Transitions (seconds)
     trans_occupied_day:
-      name: Transition (occupied, normal)
+      name: Transition (occupied, day/evening normal)
       default: 2
       selector:
         number:
@@ -141,30 +209,8 @@ blueprint:
           unit_of_measurement: s
           mode: slider
 
-    trans_dim_5m:
-      name: Transition (to Stage 2)
-      default: 30
-      selector:
-        number:
-          min: 0
-          max: 120
-          step: 1
-          unit_of_measurement: s
-          mode: slider
-
-    trans_dim_10m:
-      name: Transition (to Stage 3)
-      default: 30
-      selector:
-        number:
-          min: 0
-          max: 120
-          step: 1
-          unit_of_measurement: s
-          mode: slider
-
-    trans_dim_15m:
-      name: Transition (to Stage 4)
+    trans_dim_stage:
+      name: Transition (for ALL dim stages: Stage 2/3/4)
       default: 30
       selector:
         number:
@@ -207,15 +253,20 @@ variables:
   v_lights: !input lights
   v_occupied_brightness: !input occupied_brightness
   v_night_mode_flag: !input night_mode_flag
+  v_evening_mode_flag: !input evening_mode_flag
   v_manual_adjust_flags: !input manual_adjust_flags
 
-  # Duration helpers (entity references)
-  v_secondary_minutes_ent: !input secondary_minutes_helper
-  v_third_minutes_ent: !input third_minutes_helper
-  v_fourth_minutes_ent: !input fourth_minutes_helper
-  v_off_minutes_ent: !input off_minutes_helper
+  # Plain numeric inputs
+  v_day_stage2_minutes: !input day_stage2_minutes
+  v_day_stage3_minutes: !input day_stage3_minutes
+  v_day_stage4_minutes: !input day_stage4_minutes
+  v_day_off_minutes: !input day_off_minutes
 
-  # Night off minutes (plain number input)
+  v_evening_stage2_minutes: !input evening_stage2_minutes
+  v_evening_stage3_minutes: !input evening_stage3_minutes
+  v_evening_stage4_minutes: !input evening_stage4_minutes
+  v_evening_off_minutes: !input evening_off_minutes
+
   v_night_off_minutes: !input night_off_minutes
 
   # Manual override failsafe minutes and derived timeout string
@@ -226,6 +277,7 @@ variables:
 
   # Convenience flags
   v_is_night: "{{ is_state(v_night_mode_flag, 'on') }}"
+  v_is_evening: "{{ is_state(v_evening_mode_flag, 'on') }}"
   v_any_manual_on: "{{ expand(v_manual_adjust_flags) | selectattr('state','eq','on') | list | count > 0 }}"
 
   # Derived brightness stages from occupied brightness (clamped 0..100)
@@ -249,16 +301,44 @@ variables:
     {% set occ = [0, [occ, 100] | min] | max %}
     {{ (occ * 1 / 4) | round(0) }}
 
-  # Build HH:MM:SS strings from minute helpers
+  # Select minutes based on Day vs Evening (Night handled separately)
+  v_stage2_minutes: >
+    {% if v_is_evening | bool %}
+      {{ v_evening_stage2_minutes | int(0) }}
+    {% else %}
+      {{ v_day_stage2_minutes | int(0) }}
+    {% endif %}
+
+  v_stage3_minutes: >
+    {% if v_is_evening | bool %}
+      {{ v_evening_stage3_minutes | int(0) }}
+    {% else %}
+      {{ v_day_stage3_minutes | int(0) }}
+    {% endif %}
+
+  v_stage4_minutes: >
+    {% if v_is_evening | bool %}
+      {{ v_evening_stage4_minutes | int(0) }}
+    {% else %}
+      {{ v_day_stage4_minutes | int(0) }}
+    {% endif %}
+
+  v_off_minutes: >
+    {% if v_is_evening | bool %}
+      {{ v_evening_off_minutes | int(0) }}
+    {% else %}
+      {{ v_day_off_minutes | int(0) }}
+    {% endif %}
+
+  # Build HH:MM:SS strings from selected minutes (skip in night)
   v_timeout_stage2: >
     {% if v_is_night | bool %}
       00:00:00
     {% else %}
-      {% set m = (states(v_secondary_minutes_ent) | float(0)) %}
-      {% if m <= 0 %}
+      {% set mi = (v_stage2_minutes | int(0)) %}
+      {% if mi <= 0 %}
         00:00:00
       {% else %}
-        {% set mi = m | int %}
         {{ "%02d:%02d:%02d"|format(mi // 60, mi % 60, 0) }}
       {% endif %}
     {% endif %}
@@ -267,11 +347,10 @@ variables:
     {% if v_is_night | bool %}
       00:00:00
     {% else %}
-      {% set m = (states(v_third_minutes_ent) | float(0)) %}
-      {% if m <= 0 %}
+      {% set mi = (v_stage3_minutes | int(0)) %}
+      {% if mi <= 0 %}
         00:00:00
       {% else %}
-        {% set mi = m | int %}
         {{ "%02d:%02d:%02d"|format(mi // 60, mi % 60, 0) }}
       {% endif %}
     {% endif %}
@@ -280,11 +359,10 @@ variables:
     {% if v_is_night | bool %}
       00:00:00
     {% else %}
-      {% set m = (states(v_fourth_minutes_ent) | float(0)) %}
-      {% if m <= 0 %}
+      {% set mi = (v_stage4_minutes | int(0)) %}
+      {% if mi <= 0 %}
         00:00:00
       {% else %}
-        {% set mi = m | int %}
         {{ "%02d:%02d:%02d"|format(mi // 60, mi % 60, 0) }}
       {% endif %}
     {% endif %}
@@ -292,11 +370,11 @@ variables:
   v_timeout_off: >
     {% if v_is_night | bool %}
       {% set mi = (v_night_off_minutes | int(0)) %}
+      {{ "%02d:%02d:%02d"|format(mi // 60, mi % 60, 0) }}
     {% else %}
-      {% set m = (states(v_off_minutes_ent) | float(0)) %}
-      {% set mi = m | int %}
+      {% set mi = (v_off_minutes | int(0)) %}
+      {{ "%02d:%02d:%02d"|format(mi // 60, mi % 60, 0) }}
     {% endif %}
-    {{ "%02d:%02d:%02d"|format(mi // 60, mi % 60, 0) }}
 
 # -------------
 # Triggers
@@ -320,6 +398,16 @@ trigger:
   - id: night_mode_off
     platform: state
     entity_id: !input night_mode_flag
+    to: "off"
+
+  - id: evening_mode_on
+    platform: state
+    entity_id: !input evening_mode_flag
+    to: "on"
+
+  - id: evening_mode_off
+    platform: state
+    entity_id: !input evening_mode_flag
     to: "off"
 
 # -------------
@@ -360,10 +448,13 @@ action:
                   transition: !input trans_occupied_day
                   brightness_pct: "{{ v_occ_pct | float }}"
 
-      # --- Night mode toggled (suppressed if manual flags are ON)
+      # --- Mode toggled (suppressed if manual flags are ON)
+      # This exists to restart pending waits when mode changes.
       - conditions:
           - condition: template
-            value_template: "{{ (trigger.id == 'night_mode_on' or trigger.id == 'night_mode_off') and not (v_any_manual_on | bool) }}"
+            value_template: >
+              {{ (trigger.id in ['night_mode_on','night_mode_off','evening_mode_on','evening_mode_off'])
+                 and not (v_any_manual_on | bool) }}
         sequence:
           - choose: []
 
@@ -439,7 +530,7 @@ action:
                         target:
                           entity_id: !input lights
                         data:
-                          transition: !input trans_dim_5m
+                          transition: !input trans_dim_stage
                           brightness_pct: "{{ v_stage2_pct | float }}"
 
                   # Wait until Stage 3 timeout (or cancel on motion)
@@ -458,7 +549,7 @@ action:
                         target:
                           entity_id: !input lights
                         data:
-                          transition: !input trans_dim_10m
+                          transition: !input trans_dim_stage
                           brightness_pct: "{{ v_stage3_pct | float }}"
 
                   # Wait until Stage 4 timeout (or cancel on motion)
@@ -477,7 +568,7 @@ action:
                         target:
                           entity_id: !input lights
                         data:
-                          transition: !input trans_dim_15m
+                          transition: !input trans_dim_stage
                           brightness_pct: "{{ v_stage4_pct | float }}"
 
                   # Final wait until Off timeout (or cancel on motion)
