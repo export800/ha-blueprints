@@ -210,7 +210,7 @@ blueprint:
           mode: slider
 
     trans_dim_stage:
-      name: Transition (for ALL dim stages: Stage 2/3/4)
+      name: Dimming Transition
       default: 30
       selector:
         number:
