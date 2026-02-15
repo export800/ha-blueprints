@@ -6,8 +6,8 @@ blueprint:
     - Normal (non-night) pipeline: Stage2 -> Stage3 -> Stage4 -> Off.
     - Stage brightness is derived from Occupied brightness:
         Stage2 = 3/4, Stage3 = 2/4, Stage4 = 1/4 of occupied.
-    - Day vs Evening mode uses separate user-entered minute values for Stage2/3/4/Off.
-    - Night mode skips dim stages and uses Night Off duration.
+    - Day vs Evening mode uses separate user-entered SECOND values for Stage2/3/4/Off.
+    - Night mode skips dim stages and uses Night Off duration (seconds).
     - If ANY manual_adjust flags are ON, automation will NOT change lights on motion/mode,
       BUT will still enforce failsafe: turn OFF after X minutes of no motion.
 
@@ -57,7 +57,7 @@ blueprint:
 
     evening_mode_flag:
       name: Evening mode boolean
-      description: When ON (and Night mode is OFF), use Evening minute values for dimming/off pipeline
+      description: When ON (and Night mode is OFF), use Evening second values for dimming/off pipeline
       selector:
         entity:
           domain: input_boolean
@@ -70,110 +70,110 @@ blueprint:
         entity:
           domain: input_number
 
-    # -------- Day durations (minutes) --------
-    day_stage2_minutes:
-      name: Day - minutes to Stage 2
+    # -------- Day durations (seconds) --------
+    day_stage2_seconds:
+      name: Day - seconds to Stage 2
       selector:
         number:
           min: 0
-          max: 240
+          max: 1800
           step: 1
-          unit_of_measurement: min
+          unit_of_measurement: s
           mode: slider
-      default: 5
+      default: 300   # 5 minutes
 
-    day_stage3_minutes:
-      name: Day - minutes to Stage 3
+    day_stage3_seconds:
+      name: Day - seconds to Stage 3
       selector:
         number:
           min: 0
-          max: 240
+          max: 1800
           step: 1
-          unit_of_measurement: min
+          unit_of_measurement: s
           mode: slider
-      default: 10
+      default: 600   # 10 minutes
 
-    day_stage4_minutes:
-      name: Day - minutes to Stage 4
+    day_stage4_seconds:
+      name: Day - seconds to Stage 4
       selector:
         number:
           min: 0
-          max: 240
+          max: 1800
           step: 1
-          unit_of_measurement: min
+          unit_of_measurement: s
           mode: slider
-      default: 15
+      default: 900   # 15 minutes
 
-    day_off_minutes:
-      name: Day - minutes to Off
+    day_off_seconds:
+      name: Day - seconds to Off
       selector:
         number:
           min: 0
-          max: 240
+          max: 1800
           step: 1
-          unit_of_measurement: min
+          unit_of_measurement: s
           mode: slider
-      default: 20
+      default: 1200  # 20 minutes
 
-    # -------- Evening durations (minutes) --------
-    evening_stage2_minutes:
-      name: Evening - minutes to Stage 2
+    # -------- Evening durations (seconds) --------
+    evening_stage2_seconds:
+      name: Evening - seconds to Stage 2
       selector:
         number:
           min: 0
-          max: 240
+          max: 1800
           step: 1
-          unit_of_measurement: min
+          unit_of_measurement: s
           mode: slider
-      default: 3
+      default: 180   # 3 minutes
 
-    evening_stage3_minutes:
-      name: Evening - minutes to Stage 3
+    evening_stage3_seconds:
+      name: Evening - seconds to Stage 3
       selector:
         number:
           min: 0
-          max: 240
+          max: 1800
           step: 1
-          unit_of_measurement: min
+          unit_of_measurement: s
           mode: slider
-      default: 6
+      default: 360   # 6 minutes
 
-    evening_stage4_minutes:
-      name: Evening - minutes to Stage 4
+    evening_stage4_seconds:
+      name: Evening - seconds to Stage 4
       selector:
         number:
           min: 0
-          max: 240
+          max: 1800
           step: 1
-          unit_of_measurement: min
+          unit_of_measurement: s
           mode: slider
-      default: 9
+      default: 540   # 9 minutes
 
-    evening_off_minutes:
-      name: Evening - minutes to Off
+    evening_off_seconds:
+      name: Evening - seconds to Off
       selector:
         number:
           min: 0
-          max: 240
+          max: 1800
           step: 1
-          unit_of_measurement: min
+          unit_of_measurement: s
           mode: slider
-      default: 12
+      default: 720   # 12 minutes
 
-    # -------- Night off minutes (stages skipped at night) --------
-    night_off_minutes:
-      name: Night - minutes to Off
+    # -------- Night off seconds (stages skipped at night) --------
+    night_off_seconds:
+      name: Night - seconds to Off
       description: Night no-motion timeout before turning OFF (stages are skipped at night)
       selector:
         number:
           min: 0
-          max: 240
+          max: 1800
           step: 1
-          unit_of_measurement: min
+          unit_of_measurement: s
           mode: slider
-      default: 1
+      default: 60
 
-    # Manual override failsafe timeout (minutes)
+    # Manual override failsafe timeout (minutes) - unchanged
     manual_override_off_minutes:
       name: Manual override – minutes to Off
       description: When any manual_adjust flag is ON, turn lights OFF after this many minutes without motion
@@ -256,20 +256,20 @@ variables:
   v_evening_mode_flag: !input evening_mode_flag
   v_manual_adjust_flags: !input manual_adjust_flags
 
-  # Plain numeric inputs
-  v_day_stage2_minutes: !input day_stage2_minutes
-  v_day_stage3_minutes: !input day_stage3_minutes
-  v_day_stage4_minutes: !input day_stage4_minutes
-  v_day_off_minutes: !input day_off_minutes
+  # Plain numeric inputs (seconds)
+  v_day_stage2_seconds: !input day_stage2_seconds
+  v_day_stage3_seconds: !input day_stage3_seconds
+  v_day_stage4_seconds: !input day_stage4_seconds
+  v_day_off_seconds: !input day_off_seconds
 
-  v_evening_stage2_minutes: !input evening_stage2_minutes
-  v_evening_stage3_minutes: !input evening_stage3_minutes
-  v_evening_stage4_minutes: !input evening_stage4_minutes
-  v_evening_off_minutes: !input evening_off_minutes
+  v_evening_stage2_seconds: !input evening_stage2_seconds
+  v_evening_stage3_seconds: !input evening_stage3_seconds
+  v_evening_stage4_seconds: !input evening_stage4_seconds
+  v_evening_off_seconds: !input evening_off_seconds
 
-  v_night_off_minutes: !input night_off_minutes
+  v_night_off_seconds: !input night_off_seconds
 
-  # Manual override failsafe minutes and derived timeout string
+  # Manual override failsafe minutes and derived timeout string (unchanged)
   v_manual_override_off_minutes: !input manual_override_off_minutes
   v_manual_off_timeout: >
     {% set mi = (v_manual_override_off_minutes | int(60)) %}
@@ -301,45 +301,45 @@ variables:
     {% set occ = [0, [occ, 100] | min] | max %}
     {{ (occ * 1 / 4) | round(0) }}
 
-  # Select minutes based on Day vs Evening (Night handled separately)
-  v_stage2_minutes: >
+  # Select seconds based on Day vs Evening (Night handled separately)
+  v_stage2_seconds: >
     {% if v_is_evening | bool %}
-      {{ v_evening_stage2_minutes | int(0) }}
+      {{ v_evening_stage2_seconds | int(0) }}
     {% else %}
-      {{ v_day_stage2_minutes | int(0) }}
+      {{ v_day_stage2_seconds | int(0) }}
     {% endif %}
 
-  v_stage3_minutes: >
+  v_stage3_seconds: >
     {% if v_is_evening | bool %}
-      {{ v_evening_stage3_minutes | int(0) }}
+      {{ v_evening_stage3_seconds | int(0) }}
     {% else %}
-      {{ v_day_stage3_minutes | int(0) }}
+      {{ v_day_stage3_seconds | int(0) }}
     {% endif %}
 
-  v_stage4_minutes: >
+  v_stage4_seconds: >
     {% if v_is_evening | bool %}
-      {{ v_evening_stage4_minutes | int(0) }}
+      {{ v_evening_stage4_seconds | int(0) }}
     {% else %}
-      {{ v_day_stage4_minutes | int(0) }}
+      {{ v_day_stage4_seconds | int(0) }}
     {% endif %}
 
-  v_off_minutes: >
+  v_off_seconds: >
     {% if v_is_evening | bool %}
-      {{ v_evening_off_minutes | int(0) }}
+      {{ v_evening_off_seconds | int(0) }}
     {% else %}
-      {{ v_day_off_minutes | int(0) }}
+      {{ v_day_off_seconds | int(0) }}
     {% endif %}
 
-  # Build HH:MM:SS strings from selected minutes (skip in night)
+  # Build HH:MM:SS strings from selected seconds (skip in night for stages)
   v_timeout_stage2: >
     {% if v_is_night | bool %}
       00:00:00
     {% else %}
-      {% set mi = (v_stage2_minutes | int(0)) %}
-      {% if mi <= 0 %}
+      {% set s = (v_stage2_seconds | int(0)) %}
+      {% if s <= 0 %}
         00:00:00
       {% else %}
-        {{ "%02d:%02d:%02d"|format(mi // 60, mi % 60, 0) }}
+        {{ "%02d:%02d:%02d"|format(s // 3600, (s % 3600) // 60, s % 60) }}
       {% endif %}
     {% endif %}
 
@@ -347,11 +347,11 @@ variables:
     {% if v_is_night | bool %}
       00:00:00
     {% else %}
-      {% set mi = (v_stage3_minutes | int(0)) %}
-      {% if mi <= 0 %}
+      {% set s = (v_stage3_seconds | int(0)) %}
+      {% if s <= 0 %}
         00:00:00
       {% else %}
-        {{ "%02d:%02d:%02d"|format(mi // 60, mi % 60, 0) }}
+        {{ "%02d:%02d:%02d"|format(s // 3600, (s % 3600) // 60, s % 60) }}
       {% endif %}
     {% endif %}
 
@@ -359,21 +359,21 @@ variables:
     {% if v_is_night | bool %}
       00:00:00
     {% else %}
-      {% set mi = (v_stage4_minutes | int(0)) %}
-      {% if mi <= 0 %}
+      {% set s = (v_stage4_seconds | int(0)) %}
+      {% if s <= 0 %}
         00:00:00
       {% else %}
-        {{ "%02d:%02d:%02d"|format(mi // 60, mi % 60, 0) }}
+        {{ "%02d:%02d:%02d"|format(s // 3600, (s % 3600) // 60, s % 60) }}
       {% endif %}
     {% endif %}
 
   v_timeout_off: >
     {% if v_is_night | bool %}
-      {% set mi = (v_night_off_minutes | int(0)) %}
-      {{ "%02d:%02d:%02d"|format(mi // 60, mi % 60, 0) }}
+      {% set s = (v_night_off_seconds | int(0)) %}
+      {{ "%02d:%02d:%02d"|format(s // 3600, (s % 3600) // 60, s % 60) }}
     {% else %}
-      {% set mi = (v_off_minutes | int(0)) %}
-      {{ "%02d:%02d:%02d"|format(mi // 60, mi % 60, 0) }}
+      {% set s = (v_off_seconds | int(0)) %}
+      {{ "%02d:%02d:%02d"|format(s // 3600, (s % 3600) // 60, s % 60) }}
     {% endif %}
 
 # -------------
